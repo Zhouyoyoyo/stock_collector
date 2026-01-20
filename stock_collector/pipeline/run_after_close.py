@@ -108,6 +108,7 @@ def _build_daily_bar(raw: dict) -> DailyBar:
 
 async def _run_async(trade_date: str) -> int:
     """收盘后主流程入口。"""
+    log = logging.getLogger(__name__)
     schedule = _load_yaml(SCHEDULE_CONFIG)
     stocks_config = _load_yaml(STOCKS_CONFIG)
     scraper_config = _load_yaml(SCRAPER_CONFIG)
@@ -138,20 +139,6 @@ async def _run_async(trade_date: str) -> int:
     jitter_ms = rate_limit.get("random_jitter_ms", 120)
 
     with open_db(DEFAULT_DB_PATH) as conn:
-        current_status = fetch_statuses(conn, trade_date)
-        for symbol, status in current_status.items():
-            if status.status == "success":
-                success_symbols.add(symbol)
-
-        def already_collected(symbol: str, date_value: str) -> bool:
-            if symbol in success_symbols:
-                return True
-            cursor = conn.execute(
-                "SELECT 1 FROM daily_bar WHERE symbol = ? AND trade_date = ? LIMIT 1",
-                (symbol, date_value),
-            )
-            return cursor.fetchone() is not None
-
         def record_status(symbol: str, status: str, retry_count: int, last_error: str = "") -> None:
             status_obj = CollectStatus(
                 trade_date=trade_date,
@@ -184,6 +171,15 @@ async def _run_async(trade_date: str) -> int:
             missing_symbols.add(symbol)
             record_status(symbol, "missing", 0, reason)
 
+        def already_collected(symbol: str, date_value: str) -> bool:
+            if symbol in success_symbols:
+                return True
+            cursor = conn.execute(
+                "SELECT 1 FROM daily_bar WHERE symbol = ? AND trade_date = ? LIMIT 1",
+                (symbol, date_value),
+            )
+            return cursor.fetchone() is not None
+
         def validate_bar(bar: DailyBar) -> None:
             if bar.trade_date != trade_date:
                 raise MissingBarError(bar.symbol, trade_date, f"日期不匹配: {bar.trade_date}")
@@ -196,6 +192,49 @@ async def _run_async(trade_date: str) -> int:
                 return
             write_daily_bar(conn, bar)
 
+        current_status = fetch_statuses(conn, trade_date)
+        todo_symbols: list[str] = []
+        for symbol in symbols:
+            status = current_status.get(symbol)
+            if status and status.status == "success":
+                success_symbols.add(symbol)
+                continue
+            if already_collected(symbol, trade_date):
+                record_success(symbol, source="existing")
+                continue
+            todo_symbols.append(symbol)
+
+        log.info("todo_symbols=%s for %s", len(todo_symbols), trade_date)
+
+        if not todo_symbols:
+            duration_seconds = time.time() - start_time
+            expected = len(symbols)
+            summary = report.build_summary(
+                date_value=trade_date,
+                expected=expected,
+                success=expected,
+                failed=0,
+                missing=0,
+                skipped=len(skipped_symbols),
+                retry_success=0,
+                duration_seconds=duration_seconds,
+                source="sina",
+                runner=_runner_name(),
+                human_required=False,
+                level="INFO",
+                errors=[],
+            )
+            summary["success_rate"] = 1.0 if expected else 0.0
+            summary["same_symbol_missing_days"] = 0
+            summary["human_required"] = False
+            summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            notifier_email.send_email(summary, sorted(missing_symbols))
+            backup.create_backup_bundle(trade_date)
+            backup.cleanup_backups()
+            return 0
+
         api_missing_symbols: list[str] = []
 
         def _api_task(sym: str):
@@ -203,10 +242,7 @@ async def _run_async(trade_date: str) -> int:
 
         with ThreadPoolExecutor(max_workers=API_WORKERS) as ex:
             future_to_symbol: dict = {}
-            for symbol in symbols:
-                if already_collected(symbol, trade_date):
-                    record_success(symbol, source="existing")
-                    continue
+            for symbol in todo_symbols:
                 future = ex.submit(_api_task, symbol)
                 future_to_symbol[future] = symbol
 
@@ -247,6 +283,7 @@ async def _run_async(trade_date: str) -> int:
                         store_bar(bar)
 
                         record_success(symbol, source="dom")
+                        retry_success += 1
                     except MissingBarError as exc:
                         record_missing(symbol, reason=str(exc))
                     except RuntimeError as exc:
@@ -333,10 +370,19 @@ def should_collect(date_value: str) -> bool:
     if summary is None:
         return True
 
-    if summary.get("success", 0) > 0:
-        return False
+    if summary.get("level") == "CRITICAL":
+        return True
 
-    return True
+    if summary.get("failed", 0) > 0:
+        return True
+
+    if summary.get("missing", 0) > 0:
+        return True
+
+    if summary.get("success", 0) == 0 and summary.get("expected", 0) > 0:
+        return True
+
+    return False
 
 
 def run_collection(target_date: str) -> int:
@@ -349,7 +395,37 @@ def run_after_close(target_date: str) -> int:
         log.info("[SKIP] %s no collection needed", target_date)
         return 0
 
-    return run_collection(target_date)
+    first_code = run_collection(target_date)
+    summary = report.load_summary(target_date)
+    if summary is None:
+        log.warning("summary missing after first run: %s", target_date)
+        return 2
+
+    log.info(
+        "first run summary for %s: success=%s failed=%s missing=%s",
+        target_date,
+        summary.get("success", 0),
+        summary.get("failed", 0),
+        summary.get("missing", 0),
+    )
+
+    if summary.get("missing", 0) > 0 or summary.get("failed", 0) > 0:
+        log.info("triggering second run for %s to repair missing/failed", target_date)
+        second_code = run_collection(target_date)
+        second_summary = report.load_summary(target_date)
+        if second_summary is None:
+            log.warning("summary missing after second run: %s", target_date)
+            return 2
+        log.info(
+            "second run summary for %s: success=%s failed=%s missing=%s",
+            target_date,
+            second_summary.get("success", 0),
+            second_summary.get("failed", 0),
+            second_summary.get("missing", 0),
+        )
+        return second_code
+
+    return first_code
 
 
 def run() -> int:
