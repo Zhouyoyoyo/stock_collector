@@ -1,0 +1,8 @@
+email:
+  enabled: true
+  smtp_host: "${SMTP_HOST}"
+  smtp_port: "${SMTP_PORT}"
+  smtp_user: "${SMTP_USER}"
+  smtp_pass: "${SMTP_PASS}"
+  to: "${ALERT_EMAIL_TO}"
+  from: "${ALERT_EMAIL_FROM}"
