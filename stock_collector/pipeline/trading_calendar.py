@@ -1,38 +1,35 @@
-from datetime import date
-from pathlib import Path
+from __future__ import annotations
 
-import yaml
-from dateutil import tz
-
-CACHE_PATH = Path("stock_collector/meta/cache/trading_days.json")
-SCHEDULE_CONFIG = "stock_collector/config/schedule.yaml"
+from datetime import date, datetime
+from functools import lru_cache
 
 
-def _market_timezone():
-    with open(SCHEDULE_CONFIG, "r", encoding="utf-8") as file_handle:
-        config = yaml.safe_load(file_handle)
-    return tz.gettz(config.get("timezone_market", "Asia/Shanghai"))
+@lru_cache(maxsize=4)
+def _get_xshg_calendar():
+    import exchange_calendars as xcals
+
+    # XSHG = Shanghai Stock Exchange calendar
+    return xcals.get_calendar("XSHG")
 
 
-def is_trading_day(target_date: date) -> bool:
-    """判断是否交易日（默认工作日）。"""
-    # 预留缓存接口
-    if CACHE_PATH.exists():
-        try:
-            content = CACHE_PATH.read_text(encoding="utf-8")
-            if target_date.isoformat() in content:
-                return True
-        except Exception:
-            pass
-    # 简化策略：周一至周五视为交易日
-    if target_date.weekday() >= 5:
-        return False
+def is_trading_day(d: date | datetime) -> bool:
+    """
+    严格交易日判断（XSHG 交易所日历）
+    """
+    if isinstance(d, datetime):
+        d = d.date()
 
-    # 若最近一次 summary 显示全量 missing，则视为非交易日
-    from stock_collector.ops.report import load_last_summary
+    cal = _get_xshg_calendar()
+    # exchange_calendars uses pandas.Timestamp
+    import pandas as pd
 
-    last = load_last_summary()
-    if last and last.get("success_symbols", 0) == 0 and last.get("missing_symbols", 0) > 0:
-        return False
+    ts = pd.Timestamp(d)
+    return bool(cal.is_session(ts))
 
-    return True
+
+def ensure_trading_day_or_raise(d: date | datetime):
+    """
+    若非交易日，直接抛出 RuntimeError，让主流程跳过执行（不会制造 missing 噪音）。
+    """
+    if not is_trading_day(d):
+        raise RuntimeError("NOT_TRADING_DAY")

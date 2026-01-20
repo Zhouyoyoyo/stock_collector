@@ -3,3 +3,6 @@ pyyaml
 pytz
 python-dateutil
 requests
+
+exchange-calendars
+pandas
