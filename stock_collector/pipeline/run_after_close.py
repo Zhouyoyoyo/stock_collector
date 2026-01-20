@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import random
@@ -13,7 +14,11 @@ from stock_collector.ops import alerting, backup, notifier_email, report
 from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
 from stock_collector.pipeline import trading_calendar, validator
 from stock_collector.scraper.browser import create_browser
-from stock_collector.scraper.sina_daily import SinaMissingError, SinaScrapeError, fetch_daily_bar
+from stock_collector.scraper.sina_dom import (
+    SinaMissingError,
+    SinaScrapeError,
+    fetch_daily_bar_from_sina_dom,
+)
 from stock_collector.storage.schema import CollectStatus
 from stock_collector.storage.sqlite_store import DEFAULT_DB_PATH, fetch_statuses, init_db, now_iso
 from stock_collector.storage.writer import open_db, write_daily_bar, write_status
@@ -77,7 +82,7 @@ def _runner_name() -> str:
     return "github-actions" if os.getenv("GITHUB_ACTIONS") else "local"
 
 
-def run() -> int:
+async def _run_async() -> int:
     """收盘后主流程入口。"""
     schedule = _load_yaml(SCHEDULE_CONFIG)
     stocks_config = _load_yaml(STOCKS_CONFIG)
@@ -113,7 +118,7 @@ def run() -> int:
     delay_ms = rate_limit.get("per_symbol_delay_ms", 200)
     jitter_ms = rate_limit.get("random_jitter_ms", 120)
 
-    browser = create_browser()
+    browser = await create_browser()
     try:
         with open_db(DEFAULT_DB_PATH) as conn:
             current_status = fetch_statuses(conn, trade_date)
@@ -130,9 +135,16 @@ def run() -> int:
                 write_status(conn, status_obj)
 
             for symbol in symbols:
-                page = browser.new_page()
+                page = await browser.new_page()
                 try:
-                    bar = fetch_daily_bar(page, symbol, trade_date)
+                    bar = await fetch_daily_bar_from_sina_dom(page, symbol)
+                    if bar.trade_date != trade_date:
+                        raise SinaMissingError(
+                            symbol,
+                            trade_date,
+                            "sina",
+                            f"日期不匹配: {bar.trade_date}",
+                        )
                     validate_errors = validator.validate_bar(bar)
                     if validate_errors:
                         message = ";".join(validate_errors)
@@ -159,23 +171,30 @@ def run() -> int:
                     errors.append(error_text)
                 finally:
                     try:
-                        page.close()
+                        await page.close()
                     except Exception:
                         pass
-                time.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
+                await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
 
             rounds = schedule.get("retry", {}).get("rounds", 3)
             backoffs = schedule.get("retry", {}).get("backoff_seconds", [2, 5, 10])
             for round_index in range(1, rounds):
                 if not failed_symbols:
                     break
-                time.sleep(backoffs[min(round_index - 1, len(backoffs) - 1)])
+                await asyncio.sleep(backoffs[min(round_index - 1, len(backoffs) - 1)])
                 retry_targets = list(failed_symbols)
                 failed_symbols.clear()
                 for symbol in retry_targets:
-                    page = browser.new_page()
+                    page = await browser.new_page()
                     try:
-                        bar = fetch_daily_bar(page, symbol, trade_date)
+                        bar = await fetch_daily_bar_from_sina_dom(page, symbol)
+                        if bar.trade_date != trade_date:
+                            raise SinaMissingError(
+                                symbol,
+                                trade_date,
+                                "sina",
+                                f"日期不匹配: {bar.trade_date}",
+                            )
                         validate_errors = validator.validate_bar(bar)
                         if validate_errors:
                             message = ";".join(validate_errors)
@@ -203,13 +222,13 @@ def run() -> int:
                         errors.append(error_text)
                     finally:
                         try:
-                            page.close()
+                            await page.close()
                         except Exception:
                             pass
-                    time.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
+                    await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
 
     finally:
-        browser.close()
+        await browser.close()
 
     duration_seconds = time.time() - start_time
     expected = len(symbols)
@@ -270,3 +289,7 @@ def run() -> int:
     if level in {"ERROR", "CRITICAL"}:
         return 2
     return 0
+
+
+def run() -> int:
+    return asyncio.run(_run_async())

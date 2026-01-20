@@ -7,6 +7,21 @@ from stock_collector.storage.schema import CollectStatus, DailyBar
 DEFAULT_DB_PATH = "stock_collector/data/stock_daily.db"
 
 
+def _ensure_daily_bar_columns(conn: sqlite3.Connection) -> None:
+    cursor = conn.execute("PRAGMA table_info(daily_bar)")
+    existing = {row[1] for row in cursor.fetchall()}
+    additions = {
+        "change": "REAL NOT NULL DEFAULT 0",
+        "change_pct": "REAL NOT NULL DEFAULT 0",
+        "amplitude_pct": "REAL NOT NULL DEFAULT 0",
+        "turnover_pct": "REAL NOT NULL DEFAULT 0",
+    }
+    for column, definition in additions.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE daily_bar ADD COLUMN {column} {definition}")
+    conn.commit()
+
+
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     """初始化数据库表结构。"""
     path = Path(db_path)
@@ -22,7 +37,11 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
                 high REAL NOT NULL,
                 low REAL NOT NULL,
                 close REAL NOT NULL,
+                change REAL NOT NULL,
+                change_pct REAL NOT NULL,
                 volume INTEGER NOT NULL,
+                amplitude_pct REAL NOT NULL,
+                turnover_pct REAL NOT NULL,
                 amount REAL,
                 price_type TEXT NOT NULL,
                 source TEXT NOT NULL,
@@ -57,6 +76,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             """
         )
         conn.commit()
+        _ensure_daily_bar_columns(conn)
 
 
 def upsert_daily_bar(conn: sqlite3.Connection, bar: DailyBar) -> None:
@@ -65,14 +85,19 @@ def upsert_daily_bar(conn: sqlite3.Connection, bar: DailyBar) -> None:
         """
         INSERT INTO daily_bar (
             symbol, trade_date, open, high, low, close,
-            volume, amount, price_type, source, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            change, change_pct, volume, amplitude_pct, turnover_pct,
+            amount, price_type, source, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(symbol, trade_date) DO UPDATE SET
             open=excluded.open,
             high=excluded.high,
             low=excluded.low,
             close=excluded.close,
+            change=excluded.change,
+            change_pct=excluded.change_pct,
             volume=excluded.volume,
+            amplitude_pct=excluded.amplitude_pct,
+            turnover_pct=excluded.turnover_pct,
             amount=excluded.amount,
             price_type=excluded.price_type,
             source=excluded.source,
@@ -85,7 +110,11 @@ def upsert_daily_bar(conn: sqlite3.Connection, bar: DailyBar) -> None:
             bar.high,
             bar.low,
             bar.close,
+            bar.change,
+            bar.change_pct,
             bar.volume,
+            bar.amplitude_pct,
+            bar.turnover_pct,
             bar.amount,
             bar.price_type,
             bar.source,
