@@ -1,11 +1,12 @@
 import requests
-from datetime import datetime
 
 
 def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
     """
-    主路径：使用新浪行情 JSON 接口抓取日线数据
-    返回口径与 DOM 抓取完全一致（volume=股数）
+    主路径：新浪 JSON 行情接口
+    口径统一：
+    - volume = 成交股数
+    - 字段能拿的全部拿
     """
     url = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketData.getKLineData"
     params = {
@@ -26,15 +27,20 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
     if bar.get("day") != trade_date:
         raise RuntimeError("API_DATE_MISMATCH")
 
+    open_p = float(bar["open"])
+    close_p = float(bar["close"])
+
     return {
         "symbol": symbol,
         "trade_date": bar["day"],
-        "open": float(bar["open"]),
+        "open": open_p,
         "high": float(bar["high"]),
         "low": float(bar["low"]),
-        "close": float(bar["close"]),
-        "volume": int(float(bar["volume"])),  # API 本身就是股数
-        "change": float(bar["close"]) - float(bar["open"]),
-        "change_pct": (float(bar["close"]) - float(bar["open"])) / float(bar["open"]) * 100,
+        "close": close_p,
+        "volume": int(float(bar["volume"])),  # 股数（API 本身已是股）
+        "amount": float(bar.get("amount", 0)),
+        "pre_close": float(bar.get("preclose", 0)),
+        "change": close_p - open_p,
+        "change_pct": (close_p - open_p) / open_p * 100 if open_p else 0,
         "source": "sina_api",
     }

@@ -98,7 +98,7 @@ def _build_daily_bar(raw: dict) -> DailyBar:
         volume=int(raw.get("volume", 0)),
         amplitude_pct=float(raw.get("amplitude_pct", 0.0)),
         turnover_pct=float(raw.get("turnover_pct", 0.0)),
-        amount=None,
+        amount=float(raw["amount"]) if raw.get("amount") is not None else None,
         price_type="raw",
         source=raw.get("source", "sina"),
         updated_at=now_iso(),
@@ -178,31 +178,40 @@ async def _run_async() -> int:
             record_status(symbol, "skipped", retry_count, reason)
 
         def record_api_failure(symbol: str, error: str) -> None:
-            api_failed_symbols.append(symbol)
             record_status(symbol, "api_failed", 0, error)
+            errors.append(error)
+
+        def record_failure(symbol: str, error: str) -> None:
+            failed_symbols.add(symbol)
+            record_status(symbol, "failed", 0, error)
+            errors.append(error)
+
+        def validate_bar(bar: DailyBar) -> None:
+            if bar.trade_date != trade_date:
+                raise MissingBarError(bar.symbol, trade_date, f"日期不匹配: {bar.trade_date}")
+            validate_errors = validator.validate_bar(bar)
+            if validate_errors:
+                raise RuntimeError(";".join(validate_errors))
+
+        def store_bar(bar: DailyBar) -> None:
+            if already_collected(bar.symbol, bar.trade_date):
+                skipped_symbols.add(bar.symbol)
+                return
+            write_daily_bar(conn, bar)
 
         for symbol in symbols:
-            if already_collected(symbol, trade_date):
-                skipped_symbols.add(symbol)
-                continue
             try:
+                if already_collected(symbol, trade_date):
+                    continue
+
                 raw_bar = fetch_daily_bar_from_sina_api(symbol, trade_date)
                 bar = _build_daily_bar(raw_bar)
-                if bar.trade_date != trade_date:
-                    raise MissingBarError(symbol, trade_date, f"日期不匹配: {bar.trade_date}")
-                validate_errors = validator.validate_bar(bar)
-                if validate_errors:
-                    message = ";".join(validate_errors)
-                    error_text = f"{symbol} {trade_date} source=api {message}"
-                    errors.append(error_text)
-                    record_api_failure(symbol, error_text)
-                    continue
-                if already_collected(symbol, trade_date):
-                    skipped_symbols.add(symbol)
-                    continue
-                write_daily_bar(conn, bar)
+                validate_bar(bar)
+                store_bar(bar)
+
                 record_success(symbol, source="api")
             except Exception as exc:
+                api_failed_symbols.append(symbol)
                 record_api_failure(symbol, str(exc))
             await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
 
@@ -212,95 +221,20 @@ async def _run_async() -> int:
                 pages = [await browser.context.new_page() for _ in range(PAGE_WORKERS)]
 
                 for idx, symbol in enumerate(api_failed_symbols):
-                    if already_collected(symbol, trade_date):
-                        skipped_symbols.add(symbol)
-                        continue
                     page = pages[idx % PAGE_WORKERS]
                     try:
+                        if already_collected(symbol, trade_date):
+                            continue
+
                         raw_bar = await fetch_daily_bar_from_sina_dom(page, symbol)
                         bar = _build_daily_bar(raw_bar)
-                        if bar.trade_date != trade_date:
-                            raise MissingBarError(symbol, trade_date, f"日期不匹配: {bar.trade_date}")
-                        validate_errors = validator.validate_bar(bar)
-                        if validate_errors:
-                            message = ";".join(validate_errors)
-                            error_text = f"{symbol} {trade_date} source=sina {message}"
-                            errors.append(error_text)
-                            failed_symbols.add(symbol)
-                            record_status(symbol, "failed", 0, error_text)
-                            continue
-                        if already_collected(symbol, trade_date):
-                            skipped_symbols.add(symbol)
-                            continue
-                        write_daily_bar(conn, bar)
-                        record_success(symbol, source="dom")
-                    except MissingBarError as exc:
-                        missing_symbols.add(symbol)
-                        record_status(symbol, "missing", 0, str(exc))
-                        errors.append(str(exc))
-                    except RuntimeError as exc:
-                        if str(exc) == "STOCK_SUSPENDED":
-                            record_skipped(symbol, "suspended")
-                            continue
-                        failed_symbols.add(symbol)
-                        record_status(symbol, "failed", 0, str(exc))
-                        errors.append(str(exc))
-                    except Exception as exc:
-                        failed_symbols.add(symbol)
-                        error_text = f"{symbol} {trade_date} source=sina 未知异常: {exc}"
-                        record_status(symbol, "failed", 0, error_text)
-                        errors.append(error_text)
-                    await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
+                        validate_bar(bar)
+                        store_bar(bar)
 
-                rounds = schedule.get("retry", {}).get("rounds", 3)
-                backoffs = schedule.get("retry", {}).get("backoff_seconds", [2, 5, 10])
-                for round_index in range(1, rounds):
-                    if not failed_symbols:
-                        break
-                    await asyncio.sleep(backoffs[min(round_index - 1, len(backoffs) - 1)])
-                    retry_targets = list(failed_symbols)
-                    failed_symbols.clear()
-                    for idx, symbol in enumerate(retry_targets):
-                        if already_collected(symbol, trade_date):
-                            skipped_symbols.add(symbol)
-                            continue
-                        page = pages[idx % PAGE_WORKERS]
-                        try:
-                            raw_bar = await fetch_daily_bar_from_sina_dom(page, symbol)
-                            bar = _build_daily_bar(raw_bar)
-                            if bar.trade_date != trade_date:
-                                raise MissingBarError(symbol, trade_date, f"日期不匹配: {bar.trade_date}")
-                            validate_errors = validator.validate_bar(bar)
-                            if validate_errors:
-                                message = ";".join(validate_errors)
-                                error_text = f"{symbol} {trade_date} source=sina {message}"
-                                errors.append(error_text)
-                                failed_symbols.add(symbol)
-                                record_status(symbol, "failed", round_index, error_text)
-                                continue
-                            if already_collected(symbol, trade_date):
-                                skipped_symbols.add(symbol)
-                                continue
-                            write_daily_bar(conn, bar)
-                            record_success(symbol, retry_count=round_index, source="dom")
-                            retry_success += 1
-                        except MissingBarError as exc:
-                            missing_symbols.add(symbol)
-                            record_status(symbol, "missing", round_index, str(exc))
-                            errors.append(str(exc))
-                        except RuntimeError as exc:
-                            if str(exc) == "STOCK_SUSPENDED":
-                                record_skipped(symbol, "suspended", round_index)
-                                continue
-                            failed_symbols.add(symbol)
-                            record_status(symbol, "failed", round_index, str(exc))
-                            errors.append(str(exc))
-                        except Exception as exc:
-                            failed_symbols.add(symbol)
-                            error_text = f"{symbol} {trade_date} source=sina 未知异常: {exc}"
-                            record_status(symbol, "failed", round_index, error_text)
-                            errors.append(error_text)
-                        await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
+                        record_success(symbol, source="dom")
+                    except Exception as exc:
+                        record_failure(symbol, str(exc))
+                    await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
             finally:
                 if "pages" in locals():
                     for p in pages:
