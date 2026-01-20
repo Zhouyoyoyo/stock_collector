@@ -1,6 +1,11 @@
 from stock_collector.storage.schema import DailyBar
 
 
+class MissingBarError(RuntimeError):
+    def __init__(self, symbol: str, trade_date: str, message: str) -> None:
+        super().__init__(f"{message} (symbol={symbol}, date={trade_date}, source=sina)")
+
+
 def validate_bar(bar: DailyBar) -> list[str]:
     """校验 OHLCV 合法性。"""
     errors: list[str] = []

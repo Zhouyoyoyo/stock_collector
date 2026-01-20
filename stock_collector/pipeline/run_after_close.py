@@ -13,6 +13,7 @@ from stock_collector.meta.universe import load_universe
 from stock_collector.ops import alerting, backup, notifier_email, report
 from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
 from stock_collector.pipeline import trading_calendar, validator
+from stock_collector.pipeline.validator import MissingBarError
 from stock_collector.scraper.browser import create_browser
 from stock_collector.scraper.sina_api import fetch_daily_bar_from_sina_api
 from stock_collector.scraper.sina_dom import fetch_daily_bar_from_sina_dom
@@ -25,11 +26,6 @@ SCHEDULE_CONFIG = "stock_collector/config/schedule.yaml"
 SCRAPER_CONFIG = "stock_collector/config/scraper.yaml"
 STOCKS_CONFIG = "stock_collector/config/stocks.yaml"
 PAGE_WORKERS = 4
-
-
-class MissingBarError(RuntimeError):
-    def __init__(self, symbol: str, trade_date: str, message: str) -> None:
-        super().__init__(f"{message} (symbol={symbol}, date={trade_date}, source=sina)")
 
 
 def _load_yaml(path: str) -> dict:
@@ -186,6 +182,10 @@ async def _run_async() -> int:
             record_status(symbol, "failed", 0, error)
             errors.append(error)
 
+        def record_missing(symbol: str, reason: str) -> None:
+            missing_symbols.add(symbol)
+            record_status(symbol, "missing", 0, reason)
+
         def validate_bar(bar: DailyBar) -> None:
             if bar.trade_date != trade_date:
                 raise MissingBarError(bar.symbol, trade_date, f"日期不匹配: {bar.trade_date}")
@@ -195,13 +195,13 @@ async def _run_async() -> int:
 
         def store_bar(bar: DailyBar) -> None:
             if already_collected(bar.symbol, bar.trade_date):
-                skipped_symbols.add(bar.symbol)
                 return
             write_daily_bar(conn, bar)
 
         for symbol in symbols:
             try:
                 if already_collected(symbol, trade_date):
+                    record_success(symbol, source="existing")
                     continue
 
                 raw_bar = fetch_daily_bar_from_sina_api(symbol, trade_date)
@@ -224,6 +224,7 @@ async def _run_async() -> int:
                     page = pages[idx % PAGE_WORKERS]
                     try:
                         if already_collected(symbol, trade_date):
+                            record_success(symbol, source="existing")
                             continue
 
                         raw_bar = await fetch_daily_bar_from_sina_dom(page, symbol)
@@ -232,6 +233,13 @@ async def _run_async() -> int:
                         store_bar(bar)
 
                         record_success(symbol, source="dom")
+                    except MissingBarError as exc:
+                        record_missing(symbol, reason=str(exc))
+                    except RuntimeError as exc:
+                        if str(exc) == "STOCK_SUSPENDED":
+                            record_skipped(symbol, reason="suspended")
+                        else:
+                            record_failure(symbol, str(exc))
                     except Exception as exc:
                         record_failure(symbol, str(exc))
                     await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
