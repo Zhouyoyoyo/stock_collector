@@ -24,11 +24,26 @@ def send_email(summary: dict[str, Any], missing_symbols: list[str]) -> None:
         return
 
     smtp_host = config.get("smtp_host")
-    smtp_port = int(config.get("smtp_port") or 0)
+    try:
+        smtp_port = int(config.get("smtp_port") or 0)
+    except Exception:
+        smtp_port = 0
     smtp_user = config.get("smtp_user")
     smtp_pass = config.get("smtp_pass")
     mail_to = config.get("to")
     mail_from = config.get("from")
+
+    # ✅ 强制：邮箱配置不完整时必须降级，不允许中断主流程
+    required_fields = {
+        "smtp_host": smtp_host,
+        "smtp_port": smtp_port,
+        "to": mail_to,
+        "from": mail_from,
+    }
+    missing = [k for k, v in required_fields.items() if not v or (k == "smtp_port" and int(v) <= 0)]
+    if missing:
+        print(f"[notify] 邮件配置缺失/非法，已跳过发送: missing={missing}")
+        return
 
     subject = (
         f"[A股采集][{summary['date']}] {summary['level']} "
