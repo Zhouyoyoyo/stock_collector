@@ -14,9 +14,9 @@ import yaml
 from stock_collector.meta.universe import load_universe
 from stock_collector.ops import alerting, backup, notifier_email, report
 from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
-from stock_collector.pipeline import trading_calendar, validator
+from stock_collector.pipeline import validator
 from stock_collector.pipeline.validator import MissingBarError
-from stock_collector.pipeline.trading_calendar import ensure_trading_day_or_raise
+from stock_collector.pipeline.trading_calendar import is_calendar_trading_day
 from stock_collector.scraper.browser import create_browser
 from stock_collector.scraper.sina_api import fetch_daily_bar_from_sina_api
 from stock_collector.scraper.sina_dom import fetch_daily_bar_from_sina_dom
@@ -106,7 +106,7 @@ def _build_daily_bar(raw: dict) -> DailyBar:
     )
 
 
-async def _run_async() -> int:
+async def _run_async(trade_date: str) -> int:
     """收盘后主流程入口。"""
     schedule = _load_yaml(SCHEDULE_CONFIG)
     stocks_config = _load_yaml(STOCKS_CONFIG)
@@ -114,7 +114,6 @@ async def _run_async() -> int:
 
     market_tz = pytz.timezone(schedule["timezone_market"])
     now_market = datetime.now(market_tz)
-    trade_date = now_market.strftime("%Y-%m-%d")
 
     if not _within_window(now_market, schedule):
         summary = _write_skipped_summary(trade_date, "未到执行窗口")
@@ -326,13 +325,35 @@ async def _run_async() -> int:
     return 0
 
 
+def should_collect(date_value: str) -> bool:
+    if not is_calendar_trading_day(date_value):
+        return False
+
+    summary = report.load_summary(date_value)
+    if summary is None:
+        return True
+
+    if summary.get("success", 0) > 0:
+        return False
+
+    return True
+
+
+def run_collection(target_date: str) -> int:
+    return asyncio.run(_run_async(target_date))
+
+
+def run_after_close(target_date: str) -> int:
+    log = logging.getLogger(__name__)
+    if not should_collect(target_date):
+        log.info("[SKIP] %s no collection needed", target_date)
+        return 0
+
+    return run_collection(target_date)
+
+
 def run() -> int:
-    try:
-        ensure_trading_day_or_raise(datetime.now())
-        return asyncio.run(_run_async())
-    except RuntimeError as exc:
-        if str(exc) == "NOT_TRADING_DAY":
-            log = logging.getLogger(__name__)
-            log.info("NOT_TRADING_DAY -> skip run")
-            return 0
-        raise
+    schedule = _load_yaml(SCHEDULE_CONFIG)
+    market_tz = pytz.timezone(schedule["timezone_market"])
+    target_date = datetime.now(market_tz).strftime("%Y-%m-%d")
+    return run_after_close(target_date)

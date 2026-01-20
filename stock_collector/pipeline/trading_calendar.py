@@ -12,6 +12,18 @@ def _get_xshg_calendar():
     return xcals.get_calendar("XSHG")
 
 
+def is_calendar_trading_day(date_value: str) -> bool:
+    """
+    仅基于交易所日历判断是否开市
+    不允许读取 summary / 执行结果
+    """
+    cal = _get_xshg_calendar()
+    import pandas as pd
+
+    ts = pd.Timestamp(date.fromisoformat(date_value))
+    return bool(cal.is_session(ts))
+
+
 def is_trading_day(d: date | datetime) -> bool:
     """
     严格交易日判断（XSHG 交易所日历）
@@ -19,12 +31,7 @@ def is_trading_day(d: date | datetime) -> bool:
     if isinstance(d, datetime):
         d = d.date()
 
-    cal = _get_xshg_calendar()
-    # exchange_calendars uses pandas.Timestamp
-    import pandas as pd
-
-    ts = pd.Timestamp(d)
-    return bool(cal.is_session(ts))
+    return is_calendar_trading_day(d.isoformat())
 
 
 def ensure_trading_day_or_raise(d: date | datetime):
