@@ -1,6 +1,13 @@
 import requests
 
 
+def _safe_float(value) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
 def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
     """
     主路径：新浪 JSON 行情接口
@@ -38,8 +45,8 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
         "low": float(bar["low"]),
         "close": close_p,
         "volume": int(float(bar["volume"])),  # 股数（API 本身已是股）
-        "amount": float(bar.get("amount", 0)),
-        "pre_close": float(bar.get("preclose", 0)),
+        "amount": _safe_float(bar.get("amount")),
+        "pre_close": _safe_float(bar.get("preclose")),
         "change": close_p - open_p,
         "change_pct": (close_p - open_p) / open_p * 100 if open_p else 0,
         "source": "sina_api",

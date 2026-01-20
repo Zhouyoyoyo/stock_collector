@@ -25,4 +25,14 @@ def is_trading_day(target_date: date) -> bool:
         except Exception:
             pass
     # 简化策略：周一至周五视为交易日
-    return target_date.weekday() < 5
+    if target_date.weekday() >= 5:
+        return False
+
+    # 若最近一次 summary 显示全量 missing，则视为非交易日
+    from stock_collector.ops.report import load_last_summary
+
+    last = load_last_summary()
+    if last and last.get("success_symbols", 0) == 0 and last.get("missing_symbols", 0) > 0:
+        return False
+
+    return True
