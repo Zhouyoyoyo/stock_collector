@@ -10,6 +10,7 @@ import yaml
 
 from stock_collector.meta.universe import load_universe
 from stock_collector.ops import alerting, backup, notifier_email, report
+from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
 from stock_collector.pipeline import trading_calendar, validator
 from stock_collector.scraper.browser import create_browser
 from stock_collector.scraper.sina_daily import SinaMissingError, SinaScrapeError, fetch_daily_bar
@@ -245,6 +246,14 @@ def run() -> int:
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     notifier_email.send_email(summary, sorted(missing_symbols))
+    if summary.get("level") == "CRITICAL":
+        sms_text = (
+            "A股采集 CRITICAL\n"
+            f"{summary.get('date')} "
+            f"{summary.get('success')}/{summary.get('expected')}\n"
+            f"missing={summary.get('missing')}"
+        )
+        send_sms_via_email_once_per_day(sms_text)
     backup.create_backup_bundle(trade_date)
     backup.cleanup_backups()
 
