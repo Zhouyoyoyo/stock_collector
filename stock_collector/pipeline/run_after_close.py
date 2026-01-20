@@ -334,7 +334,9 @@ async def _run_async() -> int:
 
 def run() -> int:
     try:
-        ensure_trading_day_or_raise(datetime.now())
+        schedule = _load_yaml(SCHEDULE_CONFIG)
+        market_tz = pytz.timezone(schedule["timezone_market"])
+        ensure_trading_day_or_raise(datetime.now(market_tz))
         return asyncio.run(_run_async())
     except RuntimeError as exc:
         if str(exc) == "NOT_TRADING_DAY":
