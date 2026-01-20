@@ -122,12 +122,6 @@ async def _run_async() -> int:
         backup.create_backup_bundle(trade_date)
         return 0
 
-    if not trading_calendar.is_trading_day(now_market.date()):
-        summary = _write_skipped_summary(trade_date, "非交易日")
-        notifier_email.send_email(summary, [])
-        backup.create_backup_bundle(trade_date)
-        return 0
-
     symbols = load_universe(stocks_config)
     init_db(DEFAULT_DB_PATH)
 

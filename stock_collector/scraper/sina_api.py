@@ -1,19 +1,30 @@
 import requests
+from threading import Lock
+
+_SESSION = None
+_SESSION_LOCK = Lock()
 
 
 def _session() -> requests.Session:
     """
     带重试的 Session（最小侵入，不引入新库）
     """
-    s = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(
-        pool_connections=50,
-        pool_maxsize=50,
-        max_retries=3,
-    )
-    s.mount("https://", adapter)
-    s.mount("http://", adapter)
-    return s
+    global _SESSION
+    if _SESSION is not None:
+        return _SESSION
+    with _SESSION_LOCK:
+        if _SESSION is not None:
+            return _SESSION
+        s = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=50,
+            pool_maxsize=50,
+            max_retries=3,
+        )
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+        _SESSION = s
+        return _SESSION
 
 
 def _safe_float(v) -> float:
