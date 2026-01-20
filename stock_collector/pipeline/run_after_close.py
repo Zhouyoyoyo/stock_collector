@@ -65,6 +65,11 @@ def _write_skipped_summary(trade_date: str, reason: str) -> dict:
     summary["success_rate"] = 0.0
     summary["skipped_reason"] = reason
     summary["same_symbol_missing_days"] = 0
+
+    # ✅ 覆盖写回最终态
+    summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 
 
@@ -240,10 +245,15 @@ def run() -> int:
     if consecutive_error_days >= thresholds.get("critical_consecutive_error_days", 2):
         if initial_level in {"ERROR", "CRITICAL"}:
             level = "CRITICAL"
+
+    # level 如有变化则更新
     if level != initial_level:
         summary["level"] = level
-        summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
-        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # ✅ 关键修复：无条件把最终 summary 写回磁盘（覆盖 report.build_summary 的初始文件）
+    summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     notifier_email.send_email(summary, sorted(missing_symbols))
     if summary.get("level") == "CRITICAL":
