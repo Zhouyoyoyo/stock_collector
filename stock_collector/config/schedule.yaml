@@ -1,0 +1,18 @@
+timezone_market: "Asia/Shanghai"
+market_close_hm: "15:00"
+run_not_before_hm: "15:10"
+run_not_after_hm: "18:00"
+
+retry:
+  rounds: 3
+  backoff_seconds: [2, 5, 10]
+
+thresholds:
+  info_success_rate: 0.98
+  warn_success_rate: 0.95
+  critical_consecutive_error_days: 2
+
+human_required:
+  failed_over: 50
+  missing_over: 20
+  same_symbol_missing_days: 3
