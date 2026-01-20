@@ -2,3 +2,4 @@ playwright
 pyyaml
 pytz
 python-dateutil
+requests

@@ -33,3 +33,10 @@
 ```bash
 pip install -r stock_collector/requirements.txt
 python -m playwright install --with-deps chromium
+```
+
+### 2) 初始化全量股票池（首次运行或新环境）
+
+```bash
+python stock_collector/main.py --refresh-universe
+```
