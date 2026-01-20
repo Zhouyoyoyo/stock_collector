@@ -38,7 +38,7 @@ python stock_collector/main.py --run
 
 已提供 `daily_collect` workflow，默认北京时间 15:10（UTC 07:10）触发，含手动触发。
 
-需要在仓库 Secrets 配置上述 SMTP 相关变量。Artifacts 会上传：
+需要在仓库 Secrets 配置 SMTP 相关变量，并在 workflow 中映射为运行时环境变量（例如 `SMTP_USERNAME`、`SMTP_PASSWORD`、`SMTP_FROM`、`SMTP_TO`）。Commit messages should not include secrets. Artifacts 会上传：
 
 - `stock_collector/data/stock_daily.db`
 - `stock_collector/data/summary/*.json`
