@@ -12,7 +12,11 @@ class DailyBar:
     high: float
     low: float
     close: float
+    change: float
+    change_pct: float
     volume: int
+    amplitude_pct: float
+    turnover_pct: float
     amount: float | None = None
     price_type: str = "raw"
     source: str = "sina"
