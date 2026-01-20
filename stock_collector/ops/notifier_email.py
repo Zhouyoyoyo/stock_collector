@@ -41,9 +41,13 @@ def send_email(
     mail_to = config.get("to")
     mail_from = config.get("from")
 
-    if not smtp_user or not smtp_pass:
-        print("[notify] SMTP 凭据未配置，已跳过邮件发送")
-        return False
+    # ✅ 修复：允许无认证 SMTP（本地 relay / IP 白名单），只在同时具备 user+pass 时才 login
+    if (smtp_user and not smtp_pass) or (smtp_pass and not smtp_user):
+        # 配置不一致：只给出警告，但仍尝试“无认证发送”
+        print("[notify] SMTP 凭据不完整，将尝试无认证发送（跳过 login）")
+    elif not smtp_user and not smtp_pass:
+        # 完全未配置凭据：允许无认证发送
+        print("[notify] 未配置 SMTP 凭据，将尝试无认证发送（跳过 login）")
 
     # ✅ 强制：邮箱配置不完整时必须降级，不允许中断主流程
     required_fields = {
