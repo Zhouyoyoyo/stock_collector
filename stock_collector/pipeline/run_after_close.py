@@ -3,6 +3,8 @@ import json
 import os
 import random
 import time
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from stock_collector.ops import alerting, backup, notifier_email, report
 from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
 from stock_collector.pipeline import trading_calendar, validator
 from stock_collector.pipeline.validator import MissingBarError
+from stock_collector.pipeline.trading_calendar import ensure_trading_day_or_raise
 from stock_collector.scraper.browser import create_browser
 from stock_collector.scraper.sina_api import fetch_daily_bar_from_sina_api
 from stock_collector.scraper.sina_dom import fetch_daily_bar_from_sina_dom
@@ -25,7 +28,8 @@ from stock_collector.storage.writer import open_db, write_daily_bar, write_statu
 SCHEDULE_CONFIG = "stock_collector/config/schedule.yaml"
 SCRAPER_CONFIG = "stock_collector/config/scraper.yaml"
 STOCKS_CONFIG = "stock_collector/config/stocks.yaml"
-PAGE_WORKERS = 4
+API_WORKERS = 16
+DOM_WORKERS = 4
 
 
 def _load_yaml(path: str) -> dict:
@@ -199,30 +203,46 @@ async def _run_async() -> int:
                 return
             write_daily_bar(conn, bar)
 
-        for symbol in symbols:
-            try:
+        api_missing_symbols: list[str] = []
+
+        def _api_task(sym: str):
+            return sym, fetch_daily_bar_from_sina_api(sym, trade_date)
+
+        with ThreadPoolExecutor(max_workers=API_WORKERS) as ex:
+            future_to_symbol: dict = {}
+            for symbol in symbols:
                 if already_collected(symbol, trade_date):
                     record_success(symbol, source="existing")
                     continue
+                future = ex.submit(_api_task, symbol)
+                future_to_symbol[future] = symbol
 
-                raw_bar = fetch_daily_bar_from_sina_api(symbol, trade_date)
-                bar = _build_daily_bar(raw_bar)
-                validate_bar(bar)
-                store_bar(bar)
-
-                record_success(symbol, source="api")
-            except Exception as exc:
-                api_failed_symbols.append(symbol)
-                record_api_failure(symbol, str(exc))
-            await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
+            for fu in as_completed(future_to_symbol):
+                symbol = future_to_symbol[fu]
+                try:
+                    _, raw_bar = fu.result()
+                    bar = _build_daily_bar(raw_bar)
+                    validate_bar(bar)
+                    store_bar(bar)
+                    record_success(symbol, source="api")
+                except RuntimeError as exc:
+                    if str(exc) == "API_MISSING":
+                        record_missing(symbol, reason="api_missing")
+                        api_missing_symbols.append(symbol)
+                    else:
+                        record_api_failure(symbol, str(exc))
+                        api_failed_symbols.append(symbol)
+                except Exception as exc:
+                    record_api_failure(symbol, str(exc))
+                    api_failed_symbols.append(symbol)
 
         if api_failed_symbols:
             browser = await create_browser()
             try:
-                pages = [await browser.context.new_page() for _ in range(PAGE_WORKERS)]
+                pages = [await browser.context.new_page() for _ in range(DOM_WORKERS)]
 
                 for idx, symbol in enumerate(api_failed_symbols):
-                    page = pages[idx % PAGE_WORKERS]
+                    page = pages[idx % DOM_WORKERS]
                     try:
                         if already_collected(symbol, trade_date):
                             record_success(symbol, source="existing")
@@ -313,4 +333,12 @@ async def _run_async() -> int:
 
 
 def run() -> int:
-    return asyncio.run(_run_async())
+    try:
+        ensure_trading_day_or_raise(datetime.now())
+        return asyncio.run(_run_async())
+    except RuntimeError as exc:
+        if str(exc) == "NOT_TRADING_DAY":
+            log = logging.getLogger(__name__)
+            log.info("NOT_TRADING_DAY -> skip run")
+            return 0
+        raise
