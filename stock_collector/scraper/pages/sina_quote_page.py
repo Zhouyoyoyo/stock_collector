@@ -36,11 +36,17 @@ class SinaQuotePage:
         if not text:
             return 0.0
         t = text.strip()
-        if "万" in t:
-            return float(re.findall(r"[\d.]+", t)[0]) * 10000
-        if "%" in t:
-            return float(t.replace("%", ""))
-        return float(re.findall(r"[-\d.]+", t)[0])
+        multiplier = 1.0
+        if "亿" in t:
+            multiplier = 100000000.0
+        elif "万" in t:
+            multiplier = 10000.0
+
+        cleaned = t.replace(",", "").replace("%", "")
+        match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+        if not match:
+            return 0.0
+        return float(match.group()) * multiplier
 
     # ---------- 状态判断 ----------
 
