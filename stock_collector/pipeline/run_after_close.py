@@ -64,8 +64,6 @@ def _write_skipped_summary(trade_date: str, reason: str) -> dict:
     summary["success_rate"] = 0.0
     summary["skipped_reason"] = reason
     summary["same_symbol_missing_days"] = 0
-    summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 
 
@@ -234,8 +232,6 @@ def run() -> int:
 
     human_required = alerting.compute_human_required(summary, schedule["human_required"])
     summary["human_required"] = human_required
-    summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     consecutive_error_days = alerting.get_consecutive_error_days()
     thresholds = schedule["thresholds"]
@@ -245,6 +241,7 @@ def run() -> int:
             level = "CRITICAL"
     if level != initial_level:
         summary["level"] = level
+        summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     notifier_email.send_email(summary, sorted(missing_symbols))
