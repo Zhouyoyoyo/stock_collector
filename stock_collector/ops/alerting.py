@@ -29,7 +29,7 @@ def get_consecutive_error_days() -> int:
     """读取历史 summary 计算连续 ERROR/CRITICAL 天数。"""
     if not SUMMARY_DIR.exists():
         return 0
-    files = sorted(SUMMARY_DIR.glob("*.json"), reverse=True)
+    files = sorted(SUMMARY_DIR.glob("*.json"), key=lambda path: path.stem, reverse=True)
     count = 0
     for file_path in files:
         level = _read_summary_level(file_path)

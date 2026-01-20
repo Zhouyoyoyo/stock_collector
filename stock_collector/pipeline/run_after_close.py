@@ -126,10 +126,9 @@ def run() -> int:
                 write_status(conn, status_obj)
 
             for symbol in symbols:
+                page = browser.new_page()
                 try:
-                    page = browser.new_page()
                     bar = fetch_daily_bar(page, symbol, trade_date)
-                    page.close()
                     validate_errors = validator.validate_bar(bar)
                     if validate_errors:
                         message = ";".join(validate_errors)
@@ -154,6 +153,11 @@ def run() -> int:
                     error_text = f"{symbol} {trade_date} source=sina 未知异常: {exc}"
                     record_status(symbol, "failed", 0, error_text)
                     errors.append(error_text)
+                finally:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
                 time.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
 
             rounds = schedule.get("retry", {}).get("rounds", 3)
@@ -165,10 +169,9 @@ def run() -> int:
                 retry_targets = list(failed_symbols)
                 failed_symbols.clear()
                 for symbol in retry_targets:
+                    page = browser.new_page()
                     try:
-                        page = browser.new_page()
                         bar = fetch_daily_bar(page, symbol, trade_date)
-                        page.close()
                         validate_errors = validator.validate_bar(bar)
                         if validate_errors:
                             message = ";".join(validate_errors)
@@ -194,6 +197,11 @@ def run() -> int:
                         error_text = f"{symbol} {trade_date} source=sina 未知异常: {exc}"
                         record_status(symbol, "failed", round_index, error_text)
                         errors.append(error_text)
+                    finally:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
                     time.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
 
     finally:
@@ -206,9 +214,7 @@ def run() -> int:
     missing = len(missing_symbols)
     success_rate = success / expected if expected else 0.0
 
-    consecutive_error_days = alerting.get_consecutive_error_days()
-    level = alerting.compute_level(success_rate, consecutive_error_days, schedule["thresholds"])
-
+    initial_level = alerting.compute_level(success_rate, 0, schedule["thresholds"])
     summary = report.build_summary(
         date_value=trade_date,
         expected=expected,
@@ -220,7 +226,7 @@ def run() -> int:
         source="sina",
         runner=_runner_name(),
         human_required=False,
-        level=level,
+        level=initial_level,
         errors=errors,
     )
     summary["success_rate"] = success_rate
@@ -230,6 +236,16 @@ def run() -> int:
     summary["human_required"] = human_required
     summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    consecutive_error_days = alerting.get_consecutive_error_days()
+    thresholds = schedule["thresholds"]
+    level = initial_level
+    if consecutive_error_days >= thresholds.get("critical_consecutive_error_days", 2):
+        if initial_level in {"ERROR", "CRITICAL"}:
+            level = "CRITICAL"
+    if level != initial_level:
+        summary["level"] = level
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     notifier_email.send_email(summary, sorted(missing_symbols))
     backup.create_backup_bundle(trade_date)
