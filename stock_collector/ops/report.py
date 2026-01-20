@@ -62,14 +62,16 @@ def build_summary(
     return summary
 
 
-def load_last_summary() -> dict[str, Any] | None:
-    if not SUMMARY_DIR.exists():
+def load_summary(date_value: str) -> dict[str, Any] | None:
+    """
+    只允许读取该 date 的 summary
+    若不存在，返回 None
+    严禁 fallback
+    """
+    summary_path = SUMMARY_DIR / f"{date_value}.json"
+    if not summary_path.exists():
         return None
-    summary_files = sorted(SUMMARY_DIR.glob("*.json"))
-    if not summary_files:
-        return None
-    last_path = summary_files[-1]
     try:
-        return json.loads(last_path.read_text(encoding="utf-8"))
+        return json.loads(summary_path.read_text(encoding="utf-8"))
     except Exception:
         return None
