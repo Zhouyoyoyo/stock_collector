@@ -33,13 +33,34 @@ class SinaQuotePage:
 
     @staticmethod
     def _parse_num(text: str) -> float:
+        """
+        统一数值解析规则：
+        - 价格：元
+        - 百分比：%
+        - 成交量：返回【股数】，不是手数
+          * 1 手 = 100 股
+          * 1 万手 = 1_000_000 股
+        """
         if not text:
             return 0.0
+
         t = text.strip()
-        if "万" in t:
-            return float(re.findall(r"[\d.]+", t)[0]) * 10000
+
+        # 成交量：万手
+        if "万手" in t:
+            num = float(re.findall(r"[\d.]+", t)[0])
+            return num * 10000 * 100
+
+        # 成交量：手
+        if t.endswith("手"):
+            num = float(re.findall(r"[\d.]+", t)[0])
+            return num * 100
+
+        # 百分比
         if "%" in t:
             return float(t.replace("%", ""))
+
+        # 普通数值
         return float(re.findall(r"[-\d.]+", t)[0])
 
     # ---------- 状态判断 ----------
