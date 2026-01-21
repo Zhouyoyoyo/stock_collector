@@ -112,12 +112,28 @@ def send_email(
         server = smtplib.SMTP(smtp_host, smtp_port)
         server.starttls()
 
-    with server:
-        if smtp_user and smtp_pass:
+    try:
+        with server:
+            server.ehlo()
+
+            # 严格要求：SMTP_USER / SMTP_PASS 必须同时存在
+            if not smtp_user or not smtp_pass:
+                print(
+                    "[notify][WARN] SMTP_USER / SMTP_PASS 缺失，"
+                    "当前 SMTP 服务器不支持匿名发送，已跳过邮件通知"
+                )
+                return False
+
             server.login(smtp_user, smtp_pass)
-        server.send_message(message)
-    print("[notify] 邮件已发送")
-    return True
+            server.send_message(message)
+
+        print("[notify] 邮件已成功发送")
+        return True
+
+    except Exception as e:
+        # ⚠️ 通知失败不允许影响主流程
+        print(f"[notify][ERROR] 邮件发送失败（已吞异常，不影响主流程）: {e}")
+        return False
 
 
 # =========================
