@@ -31,13 +31,13 @@ jobs:
       - name: Install Playwright
         run: python -m playwright install --with-deps chromium
 
-      - name: Restore DB cache
+      - name: Restore CSV cache
         uses: actions/cache@v4
         with:
-          path: stock_collector/data/stock_daily.db
-          key: stock-db-${{ runner.os }}-${{ github.run_id }}
+          path: stock_collector/data/csv/**
+          key: stock-csv-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            stock-db-${{ runner.os }}-
+            stock-csv-${{ runner.os }}-
 
       - name: Check SMTP env injection (safe)
         run: |
@@ -62,8 +62,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stock-collector-data
+          name: stock-collector-csv
           path: |
-            stock_collector/data/stock_daily.db
+            stock_collector/data/csv/**
             stock_collector/data/summary/*.json
-            stock_collector/data/backup/**

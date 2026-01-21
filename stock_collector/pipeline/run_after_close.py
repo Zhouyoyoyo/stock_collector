@@ -1,15 +1,17 @@
 import asyncio
 import json
+import logging
 import os
 import random
 import time
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from pathlib import Path
 
 import pytz
 import yaml
 
+from stock_collector.config.settings import get_path
 from stock_collector.meta.universe import load_universe
 from stock_collector.ops import alerting, backup, notifier_email, report
 from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
@@ -20,6 +22,7 @@ from stock_collector.scraper.browser import create_browser
 from stock_collector.scraper.sina_api import fetch_daily_bar_from_sina_api
 from stock_collector.scraper.sina_dom import fetch_daily_bar_from_sina_dom
 from stock_collector.storage.schema import CollectStatus, DailyBar
+from stock_collector.storage.csv_writer import write_summary_csv, write_symbol_csv
 from stock_collector.storage.sqlite_store import DEFAULT_DB_PATH, fetch_statuses, init_db, now_iso
 from stock_collector.storage.writer import open_db, write_daily_bar, write_status
 
@@ -29,6 +32,7 @@ SCRAPER_CONFIG = "stock_collector/config/scraper.yaml"
 STOCKS_CONFIG = "stock_collector/config/stocks.yaml"
 API_WORKERS = 16
 DOM_WORKERS = 4
+CSV_BASE_DIR = Path("stock_collector/data/csv")
 
 
 def _load_yaml(path: str) -> dict:
@@ -120,19 +124,43 @@ async def _run_async(trade_date: str) -> int:
         def record_skipped(symbol: str, reason: str, retry_count: int = 0) -> None:
             skipped_symbols.add(symbol)
             record_status(symbol, "skipped", retry_count, reason)
+            write_symbol_csv(
+                base_dir=CSV_BASE_DIR,
+                trade_date=trade_date,
+                symbol=symbol,
+                rows=[],
+            )
 
         def record_api_failure(symbol: str, error: str) -> None:
             record_status(symbol, "api_failed", 0, error)
             errors.append(error)
+            write_symbol_csv(
+                base_dir=CSV_BASE_DIR,
+                trade_date=trade_date,
+                symbol=symbol,
+                rows=[],
+            )
 
         def record_failure(symbol: str, error: str) -> None:
             failed_symbols.add(symbol)
             record_status(symbol, "failed", 0, error)
             errors.append(error)
+            write_symbol_csv(
+                base_dir=CSV_BASE_DIR,
+                trade_date=trade_date,
+                symbol=symbol,
+                rows=[],
+            )
 
         def record_missing(symbol: str, reason: str) -> None:
             missing_symbols.add(symbol)
             record_status(symbol, "missing", 0, reason)
+            write_symbol_csv(
+                base_dir=CSV_BASE_DIR,
+                trade_date=trade_date,
+                symbol=symbol,
+                rows=[],
+            )
 
         def already_collected(symbol: str, date_value: str) -> bool:
             if symbol in success_symbols:
@@ -154,6 +182,23 @@ async def _run_async(trade_date: str) -> int:
             if already_collected(bar.symbol, bar.trade_date):
                 return
             write_daily_bar(conn, bar)
+            write_symbol_csv(
+                base_dir=CSV_BASE_DIR,
+                trade_date=bar.trade_date,
+                symbol=bar.symbol,
+                rows=[
+                    {
+                        "trade_date": bar.trade_date,
+                        "symbol": bar.symbol,
+                        "open": bar.open,
+                        "high": bar.high,
+                        "low": bar.low,
+                        "close": bar.close,
+                        "volume": bar.volume,
+                        "amount": bar.amount,
+                    }
+                ],
+            )
 
         current_status = fetch_statuses(conn, trade_date)
         todo_symbols: list[str] = []
@@ -190,6 +235,11 @@ async def _run_async(trade_date: str) -> int:
             summary["success_rate"] = 1.0 if expected else 0.0
             summary["same_symbol_missing_days"] = 0
             summary["human_required"] = False
+            write_summary_csv(
+                base_dir=CSV_BASE_DIR,
+                trade_date=trade_date,
+                summary_rows=summary.get("symbols", []),
+            )
             summary_path = get_path("summary_dir") / f"{trade_date}.json"
             summary_path.parent.mkdir(parents=True, exist_ok=True)
             summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -291,6 +341,11 @@ async def _run_async(trade_date: str) -> int:
 
     human_required = alerting.compute_human_required(summary, schedule["human_required"])
     summary["human_required"] = human_required
+    write_summary_csv(
+        base_dir=CSV_BASE_DIR,
+        trade_date=trade_date,
+        summary_rows=summary.get("symbols", []),
+    )
 
     consecutive_error_days = alerting.get_consecutive_error_days()
     thresholds = schedule["thresholds"]
@@ -407,4 +462,3 @@ def run() -> int:
     market_tz = pytz.timezone(schedule["timezone_market"])
     target_date = datetime.now(market_tz).strftime("%Y-%m-%d")
     return run_after_close(target_date)
-from stock_collector.config.settings import get_path
