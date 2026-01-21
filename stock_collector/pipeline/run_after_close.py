@@ -90,13 +90,14 @@ async def _run_async(trade_date: str) -> int:
     stocks_config = _load_yaml(STOCKS_CONFIG)
     scraper_config = _load_yaml(SCRAPER_CONFIG)
 
+    trade_date_str = trade_date
+    is_trading_day = is_calendar_trading_day(trade_date)
     success_count = 0
     missing_count = 0
     failed_count = 0
-    first_error = None
-    is_trading_day = None
+    first_error = None  # dict or None
     write_bundle(DebugBundle(
-        target_date=trade_date,
+        target_date=trade_date_str,
         stage="start",
         is_trading_day=is_trading_day,
         total_symbols=0,
@@ -110,7 +111,7 @@ async def _run_async(trade_date: str) -> int:
 
     symbols = load_universe(stocks_config)
     write_bundle(DebugBundle(
-        target_date=trade_date,
+        target_date=trade_date_str,
         stage="after_symbols_loaded",
         is_trading_day=is_trading_day,
         total_symbols=len(symbols),
@@ -121,9 +122,8 @@ async def _run_async(trade_date: str) -> int:
         note="symbols loaded",
         env=safe_env_snapshot(),
     ))
-    is_trading_day = is_calendar_trading_day(trade_date)
     write_bundle(DebugBundle(
-        target_date=trade_date,
+        target_date=trade_date_str,
         stage="trading_day_checked",
         is_trading_day=is_trading_day,
         total_symbols=len(symbols),
@@ -187,7 +187,11 @@ async def _run_async(trade_date: str) -> int:
                 failed_count += 1
                 failed_event_symbols.add(symbol)
             if first_error is None:
-                first_error = f"FAILED: {symbol} {error}"
+                first_error = {
+                    "type": "failed",
+                    "symbol": symbol,
+                    "exception": repr(error),
+                }
             write_symbol_csv(
                 base_dir=CSV_BASE_DIR,
                 trade_date=trade_date,
@@ -204,7 +208,11 @@ async def _run_async(trade_date: str) -> int:
             record_status(symbol, "failed", 0, error)
             errors.append(error)
             if first_error is None:
-                first_error = f"FAILED: {symbol} {error}"
+                first_error = {
+                    "type": "failed",
+                    "symbol": symbol,
+                    "exception": repr(error),
+                }
             write_symbol_csv(
                 base_dir=CSV_BASE_DIR,
                 trade_date=trade_date,
@@ -219,7 +227,11 @@ async def _run_async(trade_date: str) -> int:
             missing_symbols.add(symbol)
             record_status(symbol, "missing", 0, reason)
             if first_error is None:
-                first_error = f"MISSING: {symbol} {reason}"
+                first_error = {
+                    "type": "missing",
+                    "symbol": symbol,
+                    "exception": repr(reason),
+                }
             write_symbol_csv(
                 base_dir=CSV_BASE_DIR,
                 trade_date=trade_date,
@@ -297,7 +309,7 @@ async def _run_async(trade_date: str) -> int:
             if is_trading_day:
                 if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
                     write_bundle(DebugBundle(
-                        target_date=trade_date,
+                        target_date=trade_date_str,
                         stage="fatal",
                         is_trading_day=is_trading_day,
                         total_symbols=len(symbols),
@@ -305,13 +317,14 @@ async def _run_async(trade_date: str) -> int:
                         missing_count=missing_count,
                         failed_count=failed_count,
                         first_error=first_error,
-                        note="FATAL: trading day requires zero missing/failed and full success",
+                        note="FATAL: trading day requires full success with zero missing/failed",
                         env=safe_env_snapshot(),
                     ))
                     raise RuntimeError(
-                        "FATAL: 交易日出现缺失/失败，不允许继续。"
-                        f" total={len(symbols)} success={success_count} missing={missing_count} failed={failed_count} "
-                        f"first_error={first_error}. 请下载 debug_bundle 证据包排查。"
+                        "FATAL: 交易日出现缺失/失败，违反业务公理。"
+                        f" total={len(symbols)} success={success_count}"
+                        f" missing={missing_count} failed={failed_count}"
+                        f" first_error={first_error}"
                     )
             duration_seconds = time.time() - start_time
             expected = len(symbols)
@@ -419,7 +432,7 @@ async def _run_async(trade_date: str) -> int:
     success_rate = success / expected if expected else 0.0
 
     write_bundle(DebugBundle(
-        target_date=trade_date,
+        target_date=trade_date_str,
         stage="after_fetch",
         is_trading_day=is_trading_day,
         total_symbols=len(symbols),
@@ -433,7 +446,7 @@ async def _run_async(trade_date: str) -> int:
     if is_trading_day:
         if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
             write_bundle(DebugBundle(
-                target_date=trade_date,
+                target_date=trade_date_str,
                 stage="fatal",
                 is_trading_day=is_trading_day,
                 total_symbols=len(symbols),
@@ -441,13 +454,14 @@ async def _run_async(trade_date: str) -> int:
                 missing_count=missing_count,
                 failed_count=failed_count,
                 first_error=first_error,
-                note="FATAL: trading day requires zero missing/failed and full success",
+                note="FATAL: trading day requires full success with zero missing/failed",
                 env=safe_env_snapshot(),
             ))
             raise RuntimeError(
-                "FATAL: 交易日出现缺失/失败，不允许继续。"
-                f" total={len(symbols)} success={success_count} missing={missing_count} failed={failed_count} "
-                f"first_error={first_error}. 请下载 debug_bundle 证据包排查。"
+                "FATAL: 交易日出现缺失/失败，违反业务公理。"
+                f" total={len(symbols)} success={success_count}"
+                f" missing={missing_count} failed={failed_count}"
+                f" first_error={first_error}"
             )
 
     initial_level = alerting.compute_level(success_rate, 0, schedule["thresholds"])
