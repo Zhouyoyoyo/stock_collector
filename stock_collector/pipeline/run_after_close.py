@@ -591,16 +591,44 @@ def run_after_close(target_date: str) -> int:
     market_tz = pytz.timezone(schedule["timezone_market"])
     now_market = datetime.now(market_tz)
     is_trading_day = is_calendar_trading_day(target_date)
+    summary_exists = report.load_summary(target_date) is not None
 
     if not _within_window(now_market, schedule):
         log.info("[SKIP] %s outside run window", target_date)
-        if not is_trading_day and report.load_summary(target_date) is None:
-            _write_skip_summary(target_date, "non_trading_day")
+        write_bundle(DebugBundle(
+            target_date=target_date,
+            stage="skip_outside_window",
+            is_trading_day=is_trading_day,
+            total_symbols=0,
+            success_count=0,
+            missing_count=0,
+            failed_count=0,
+            first_error=None,
+            note="skip: outside run window",
+            env=safe_env_snapshot(),
+        ))
+        if not summary_exists:
+            _write_skip_summary(
+                target_date,
+                "non_trading_day" if not is_trading_day else "outside_window",
+            )
         return 0
 
     if not should_collect(target_date):
         log.info("[SKIP] %s no collection needed", target_date)
-        if not is_trading_day and report.load_summary(target_date) is None:
+        write_bundle(DebugBundle(
+            target_date=target_date,
+            stage="skip_no_collection",
+            is_trading_day=is_trading_day,
+            total_symbols=0,
+            success_count=0,
+            missing_count=0,
+            failed_count=0,
+            first_error=None,
+            note="skip: no collection needed",
+            env=safe_env_snapshot(),
+        ))
+        if not summary_exists and not is_trading_day:
             _write_skip_summary(target_date, "non_trading_day")
         return 0
 
