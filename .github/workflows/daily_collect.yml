@@ -62,7 +62,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stock-collector-csv
+          name: stock-collector-artifacts
           path: |
+            stock_collector/data/debug_bundle/**
             stock_collector/data/csv/**
             stock_collector/data/summary/*.json

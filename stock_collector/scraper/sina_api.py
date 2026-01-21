@@ -1,7 +1,10 @@
+import json
+from threading import Lock
+
 import requests
 
 from stock_collector.config.settings import get_url
-from threading import Lock
+from stock_collector.ops.debug_bundle import DEBUG_DIR
 
 _SESSION = None
 _SESSION_LOCK = Lock()
@@ -38,6 +41,28 @@ def _safe_float(v) -> float:
         return 0.0
 
 
+def _maybe_write_raw_first_error(
+    symbol: str,
+    url: str,
+    params: dict,
+    response: requests.Response | None,
+    exc: Exception,
+) -> None:
+    path = DEBUG_DIR / "raw_first_error.json"
+    if path.exists():
+        return
+    DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "symbol": symbol,
+        "url": url,
+        "params": params,
+        "status_code": response.status_code if response is not None else None,
+        "response_text": response.text[:2048] if response is not None else None,
+        "exception": repr(exc),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
     """
     主路径：新浪 JSON K 线接口
@@ -48,38 +73,43 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
     params = {"symbol": symbol, "scale": 240, "ma": "no", "datalen": 1}
 
     s = _session()
-    r = s.get(url, params=params, timeout=10)
-    r.raise_for_status()
+    response = None
+    try:
+        response = s.get(url, params=params, timeout=10)
+        response.raise_for_status()
 
-    data = r.json()
-    if not data:
-        raise RuntimeError("API_MISSING")
-
-    bar = data[0]
-    day = bar.get("day")
-    if day != trade_date:
-        raise RuntimeError("API_MISSING")
-
-    # 必需字段（OHLCV）缺失则视为 missing
-    for k in ("open", "high", "low", "close", "volume"):
-        if k not in bar or bar[k] in (None, "", "--"):
+        data = response.json()
+        if not data:
             raise RuntimeError("API_MISSING")
 
-    open_p = float(bar["open"])
-    close_p = float(bar["close"])
+        bar = data[0]
+        day = bar.get("day")
+        if day != trade_date:
+            raise RuntimeError("API_MISSING")
 
-    return {
-        "symbol": symbol,
-        "trade_date": day,
-        "open": open_p,
-        "high": float(bar["high"]),
-        "low": float(bar["low"]),
-        "close": close_p,
-        # API volume 本身通常是股数；统一转 int
-        "volume": int(float(bar["volume"])),
-        "amount": _safe_float(bar.get("amount")),
-        "pre_close": _safe_float(bar.get("preclose")),
-        "change": close_p - open_p,
-        "change_pct": (close_p - open_p) / open_p * 100 if open_p else 0.0,
-        "source": "sina_api",
-    }
+        # 必需字段（OHLCV）缺失则视为 missing
+        for k in ("open", "high", "low", "close", "volume"):
+            if k not in bar or bar[k] in (None, "", "--"):
+                raise RuntimeError("API_MISSING")
+
+        open_p = float(bar["open"])
+        close_p = float(bar["close"])
+
+        return {
+            "symbol": symbol,
+            "trade_date": day,
+            "open": open_p,
+            "high": float(bar["high"]),
+            "low": float(bar["low"]),
+            "close": close_p,
+            # API volume 本身通常是股数；统一转 int
+            "volume": int(float(bar["volume"])),
+            "amount": _safe_float(bar.get("amount")),
+            "pre_close": _safe_float(bar.get("preclose")),
+            "change": close_p - open_p,
+            "change_pct": (close_p - open_p) / open_p * 100 if open_p else 0.0,
+            "source": "sina_api",
+        }
+    except Exception as exc:
+        _maybe_write_raw_first_error(symbol, url, params, response, exc)
+        raise

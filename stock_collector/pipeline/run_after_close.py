@@ -15,6 +15,7 @@ from stock_collector.config.settings import get_path
 from stock_collector.meta.universe import load_universe
 from stock_collector.ops import alerting, backup, notifier_email, report
 from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
+from stock_collector.ops.debug_bundle import DebugBundle, safe_env_snapshot, write_bundle
 from stock_collector.pipeline import validator
 from stock_collector.pipeline.validator import MissingBarError
 from stock_collector.pipeline.trading_calendar import is_calendar_trading_day
@@ -89,7 +90,50 @@ async def _run_async(trade_date: str) -> int:
     stocks_config = _load_yaml(STOCKS_CONFIG)
     scraper_config = _load_yaml(SCRAPER_CONFIG)
 
+    success_count = 0
+    missing_count = 0
+    failed_count = 0
+    first_error = None
+    is_trading_day = None
+    write_bundle(DebugBundle(
+        target_date=trade_date,
+        stage="start",
+        is_trading_day=is_trading_day,
+        total_symbols=0,
+        success_count=success_count,
+        missing_count=missing_count,
+        failed_count=failed_count,
+        first_error=first_error,
+        note="pipeline started",
+        env=safe_env_snapshot(),
+    ))
+
     symbols = load_universe(stocks_config)
+    write_bundle(DebugBundle(
+        target_date=trade_date,
+        stage="after_symbols_loaded",
+        is_trading_day=is_trading_day,
+        total_symbols=len(symbols),
+        success_count=success_count,
+        missing_count=missing_count,
+        failed_count=failed_count,
+        first_error=first_error,
+        note="symbols loaded",
+        env=safe_env_snapshot(),
+    ))
+    is_trading_day = is_calendar_trading_day(trade_date)
+    write_bundle(DebugBundle(
+        target_date=trade_date,
+        stage="trading_day_checked",
+        is_trading_day=is_trading_day,
+        total_symbols=len(symbols),
+        success_count=success_count,
+        missing_count=missing_count,
+        failed_count=failed_count,
+        first_error=first_error,
+        note="trading day decided",
+        env=safe_env_snapshot(),
+    ))
     init_db(DEFAULT_DB_PATH)
 
     start_time = time.time()
@@ -98,6 +142,7 @@ async def _run_async(trade_date: str) -> int:
     failed_symbols: set[str] = set()
     missing_symbols: set[str] = set()
     skipped_symbols: set[str] = set()
+    failed_event_symbols: set[str] = set()
     api_failed_symbols: list[str] = []
     retry_success = 0
 
@@ -118,6 +163,9 @@ async def _run_async(trade_date: str) -> int:
             write_status(conn, status_obj)
 
         def record_success(symbol: str, retry_count: int = 0, source: str = "api") -> None:
+            nonlocal success_count
+            if symbol not in success_symbols:
+                success_count += 1
             success_symbols.add(symbol)
             record_status(symbol, "success", retry_count, "")
 
@@ -132,8 +180,14 @@ async def _run_async(trade_date: str) -> int:
             )
 
         def record_api_failure(symbol: str, error: str) -> None:
+            nonlocal failed_count, first_error
             record_status(symbol, "api_failed", 0, error)
             errors.append(error)
+            if symbol not in failed_event_symbols:
+                failed_count += 1
+                failed_event_symbols.add(symbol)
+            if first_error is None:
+                first_error = f"FAILED: {symbol} {error}"
             write_symbol_csv(
                 base_dir=CSV_BASE_DIR,
                 trade_date=trade_date,
@@ -142,9 +196,15 @@ async def _run_async(trade_date: str) -> int:
             )
 
         def record_failure(symbol: str, error: str) -> None:
+            nonlocal failed_count, first_error
+            if symbol not in failed_event_symbols:
+                failed_count += 1
+                failed_event_symbols.add(symbol)
             failed_symbols.add(symbol)
             record_status(symbol, "failed", 0, error)
             errors.append(error)
+            if first_error is None:
+                first_error = f"FAILED: {symbol} {error}"
             write_symbol_csv(
                 base_dir=CSV_BASE_DIR,
                 trade_date=trade_date,
@@ -153,8 +213,13 @@ async def _run_async(trade_date: str) -> int:
             )
 
         def record_missing(symbol: str, reason: str) -> None:
+            nonlocal missing_count, first_error
+            if symbol not in missing_symbols:
+                missing_count += 1
             missing_symbols.add(symbol)
             record_status(symbol, "missing", 0, reason)
+            if first_error is None:
+                first_error = f"MISSING: {symbol} {reason}"
             write_symbol_csv(
                 base_dir=CSV_BASE_DIR,
                 trade_date=trade_date,
@@ -205,6 +270,8 @@ async def _run_async(trade_date: str) -> int:
         for symbol in symbols:
             status = current_status.get(symbol)
             if status and status.status == "success":
+                if symbol not in success_symbols:
+                    success_count += 1
                 success_symbols.add(symbol)
                 continue
             if already_collected(symbol, trade_date):
@@ -215,6 +282,37 @@ async def _run_async(trade_date: str) -> int:
         log.info("todo_symbols=%s for %s", len(todo_symbols), trade_date)
 
         if not todo_symbols:
+            write_bundle(DebugBundle(
+                target_date=trade_date,
+                stage="after_fetch",
+                is_trading_day=is_trading_day,
+                total_symbols=len(symbols),
+                success_count=success_count,
+                missing_count=missing_count,
+                failed_count=failed_count,
+                first_error=first_error,
+                note="fetch finished",
+                env=safe_env_snapshot(),
+            ))
+            if is_trading_day:
+                if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
+                    write_bundle(DebugBundle(
+                        target_date=trade_date,
+                        stage="fatal",
+                        is_trading_day=is_trading_day,
+                        total_symbols=len(symbols),
+                        success_count=success_count,
+                        missing_count=missing_count,
+                        failed_count=failed_count,
+                        first_error=first_error,
+                        note="FATAL: trading day requires zero missing/failed and full success",
+                        env=safe_env_snapshot(),
+                    ))
+                    raise RuntimeError(
+                        "FATAL: 交易日出现缺失/失败，不允许继续。"
+                        f" total={len(symbols)} success={success_count} missing={missing_count} failed={failed_count} "
+                        f"first_error={first_error}. 请下载 debug_bundle 证据包排查。"
+                    )
             duration_seconds = time.time() - start_time
             expected = len(symbols)
             summary = report.build_summary(
@@ -319,6 +417,38 @@ async def _run_async(trade_date: str) -> int:
     failed = len(failed_symbols)
     missing = len(missing_symbols)
     success_rate = success / expected if expected else 0.0
+
+    write_bundle(DebugBundle(
+        target_date=trade_date,
+        stage="after_fetch",
+        is_trading_day=is_trading_day,
+        total_symbols=len(symbols),
+        success_count=success_count,
+        missing_count=missing_count,
+        failed_count=failed_count,
+        first_error=first_error,
+        note="fetch finished",
+        env=safe_env_snapshot(),
+    ))
+    if is_trading_day:
+        if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
+            write_bundle(DebugBundle(
+                target_date=trade_date,
+                stage="fatal",
+                is_trading_day=is_trading_day,
+                total_symbols=len(symbols),
+                success_count=success_count,
+                missing_count=missing_count,
+                failed_count=failed_count,
+                first_error=first_error,
+                note="FATAL: trading day requires zero missing/failed and full success",
+                env=safe_env_snapshot(),
+            ))
+            raise RuntimeError(
+                "FATAL: 交易日出现缺失/失败，不允许继续。"
+                f" total={len(symbols)} success={success_count} missing={missing_count} failed={failed_count} "
+                f"first_error={first_error}. 请下载 debug_bundle 证据包排查。"
+            )
 
     initial_level = alerting.compute_level(success_rate, 0, schedule["thresholds"])
     summary = report.build_summary(
