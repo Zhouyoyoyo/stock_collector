@@ -55,33 +55,6 @@ def _within_window(now_market: datetime, schedule: dict) -> bool:
     return start <= now_market <= end
 
 
-def _write_skipped_summary(trade_date: str, reason: str) -> dict:
-    summary = report.build_summary(
-        date_value=trade_date,
-        expected=0,
-        success=0,
-        failed=0,
-        missing=0,
-        skipped=0,
-        retry_success=0,
-        duration_seconds=0.0,
-        source="sina",
-        runner=_runner_name(),
-        human_required=False,
-        level="INFO",
-        errors=[reason],
-    )
-    summary["success_rate"] = 0.0
-    summary["skipped_reason"] = reason
-    summary["same_symbol_missing_days"] = 0
-
-    # ✅ 覆盖写回最终态
-    summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    return summary
-
-
 def _runner_name() -> str:
     return "github-actions" if os.getenv("GITHUB_ACTIONS") else "local"
 
@@ -112,15 +85,6 @@ async def _run_async(trade_date: str) -> int:
     schedule = _load_yaml(SCHEDULE_CONFIG)
     stocks_config = _load_yaml(STOCKS_CONFIG)
     scraper_config = _load_yaml(SCRAPER_CONFIG)
-
-    market_tz = pytz.timezone(schedule["timezone_market"])
-    now_market = datetime.now(market_tz)
-
-    if not _within_window(now_market, schedule):
-        summary = _write_skipped_summary(trade_date, "未到执行窗口")
-        notifier_email.send_email(summary, [])
-        backup.create_backup_bundle(trade_date)
-        return 0
 
     symbols = load_universe(stocks_config)
     init_db(DEFAULT_DB_PATH)
@@ -370,6 +334,9 @@ def should_collect(date_value: str) -> bool:
     if summary is None:
         return True
 
+    if summary.get("expected") == 0 and summary.get("success") == 0 and summary.get("failed") == 0 and summary.get("missing") == 0:
+        return True
+
     if summary.get("level") == "CRITICAL":
         return True
 
@@ -379,7 +346,7 @@ def should_collect(date_value: str) -> bool:
     if summary.get("missing", 0) > 0:
         return True
 
-    if summary.get("success", 0) == 0 and summary.get("expected", 0) > 0:
+    if summary.get("success", 0) < summary.get("expected", 0):
         return True
 
     return False
@@ -391,6 +358,14 @@ def run_collection(target_date: str) -> int:
 
 def run_after_close(target_date: str) -> int:
     log = logging.getLogger(__name__)
+    schedule = _load_yaml(SCHEDULE_CONFIG)
+    market_tz = pytz.timezone(schedule["timezone_market"])
+    now_market = datetime.now(market_tz)
+
+    if not _within_window(now_market, schedule):
+        log.info("[SKIP] %s outside run window", target_date)
+        return 0
+
     if not should_collect(target_date):
         log.info("[SKIP] %s no collection needed", target_date)
         return 0
