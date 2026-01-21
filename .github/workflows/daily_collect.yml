@@ -9,7 +9,7 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     env:
-      SMTP_USER: ${{ secrets.SMTP_USERNAME }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_PASS: ${{ secrets.SMTP_PASSWORD }}
       ALERT_EMAIL_FROM: ${{ secrets.SMTP_FROM }}
       ALERT_EMAIL_TO: ${{ secrets.SMTP_TO }}
@@ -38,6 +38,22 @@ jobs:
           key: stock-db-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             stock-db-${{ runner.os }}-
+
+      - name: Check SMTP env injection (safe)
+        run: |
+          python - << 'EOF'
+          import os
+          keys = [
+              "SMTP_HOST",
+              "SMTP_PORT",
+              "SMTP_USER",
+              "SMTP_PASS",
+              "ALERT_EMAIL_FROM",
+              "ALERT_EMAIL_TO",
+          ]
+          for k in keys:
+              print(f"[env-check] {k} =", "SET" if os.getenv(k) else "MISSING")
+          EOF
 
       - name: Run collector
         run: python stock_collector/main.py --run
