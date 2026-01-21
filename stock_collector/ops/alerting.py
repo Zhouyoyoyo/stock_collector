@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from stock_collector.config.settings import get_path
 
-SUMMARY_DIR = Path("stock_collector/data/summary")
+SUMMARY_DIR = get_path("summary_dir")
 
 
 def compute_level(success_rate: float, consecutive_error_days: int, thresholds: dict[str, Any]) -> str:

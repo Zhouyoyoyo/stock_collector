@@ -5,6 +5,7 @@ from typing import Any
 
 from playwright.sync_api import Page
 
+from stock_collector.config.settings import get_url
 from stock_collector.storage.schema import DailyBar
 
 
@@ -57,7 +58,7 @@ def fetch_daily_bar(page: Page, symbol: str, trade_date: str) -> DailyBar:
     """抓取新浪单日行情。"""
     symbol_lower = symbol.lower()
     source = "sina"
-    url = f"https://finance.sina.com.cn/realstock/company/{symbol_lower}/nc.shtml"
+    url = get_url("sina_quote_page").format(symbol=symbol_lower)
 
     try:
         page.goto(url, wait_until="domcontentloaded")
@@ -65,7 +66,7 @@ def fetch_daily_bar(page: Page, symbol: str, trade_date: str) -> DailyBar:
         raise SinaScrapeError(symbol, trade_date, source, f"页面加载失败: {exc}")
 
     api_url = (
-        "https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_kline="
+        f"{get_url('sina_kline_jsonp')}"
         f"/CN_MarketData.getKLineData?symbol={symbol_lower}&scale=240&ma=no&datalen=1"
     )
 

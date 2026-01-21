@@ -26,6 +26,21 @@
 
 ---
 
+## 配置文件
+
+项目关键变量已集中到 `stock_collector/config/app.yaml` 管理，便于统一修改路径与外部 URL：
+
+- `paths`：数据目录、SQLite DB、summary、backup 等相对路径
+- `urls`：新浪股票池接口、行情页与 K 线接口等 URL 模板
+
+此外，股票池/调度/通知等仍在原有 YAML 文件中维护：
+
+- `stock_collector/config/stocks.yaml`：股票池缓存路径与默认股票列表
+- `stock_collector/config/schedule.yaml`：采集与告警规则
+- `stock_collector/config/notify.yaml`：邮件/短信告警配置
+
+---
+
 ## 快速开始（本地）
 
 ### 1) 安装依赖

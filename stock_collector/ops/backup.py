@@ -4,9 +4,10 @@ import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from stock_collector.config.settings import get_path
 
-DATA_DIR = Path("stock_collector/data")
-BACKUP_DIR = DATA_DIR / "backup"
+DATA_DIR = get_path("data_dir")
+BACKUP_DIR = get_path("backup_dir")
 
 
 def _file_hash(path: Path) -> str:
@@ -22,8 +23,8 @@ def create_backup_bundle(date_value: str) -> Path:
     backup_path = BACKUP_DIR / date_value
     backup_path.mkdir(parents=True, exist_ok=True)
 
-    db_path = DATA_DIR / "stock_daily.db"
-    summary_path = DATA_DIR / "summary" / f"{date_value}.json"
+    db_path = get_path("db_path")
+    summary_path = get_path("summary_dir") / f"{date_value}.json"
 
     files = []
     for src in [db_path, summary_path]:
