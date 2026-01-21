@@ -2,9 +2,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from stock_collector.config.settings import get_path
 from stock_collector.storage.schema import CollectStatus, DailyBar
 
-DEFAULT_DB_PATH = "stock_collector/data/stock_daily.db"
+DEFAULT_DB_PATH = str(get_path("db_path"))
 
 
 def _ensure_daily_bar_columns(conn: sqlite3.Connection) -> None:

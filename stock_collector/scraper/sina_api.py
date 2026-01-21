@@ -1,4 +1,6 @@
 import requests
+
+from stock_collector.config.settings import get_url
 from threading import Lock
 
 _SESSION = None
@@ -42,7 +44,7 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
     - 若返回空/日期不匹配/字段不全：抛 RuntimeError(API_MISSING)
     - 其他错误：原样抛出（会进入 api_failed）
     """
-    url = "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketData.getKLineData"
+    url = get_url("sina_kline_api")
     params = {"symbol": symbol, "scale": 240, "ma": "no", "datalen": 1}
 
     s = _session()

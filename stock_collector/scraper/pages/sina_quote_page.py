@@ -1,6 +1,8 @@
 import re
 from datetime import datetime
 
+from stock_collector.config.settings import get_url
+
 
 class SinaQuotePage:
     """
@@ -11,7 +13,7 @@ class SinaQuotePage:
     - 数据解析
     """
 
-    URL_TMPL = "https://finance.sina.com.cn/realstock/company/{symbol}/nc.shtml"
+    URL_TMPL = get_url("sina_quote_page")
 
     def __init__(self, page):
         self.page = page

@@ -6,7 +6,6 @@ import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from pathlib import Path
 
 import pytz
 import yaml
@@ -191,7 +190,7 @@ async def _run_async(trade_date: str) -> int:
             summary["success_rate"] = 1.0 if expected else 0.0
             summary["same_symbol_missing_days"] = 0
             summary["human_required"] = False
-            summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
+            summary_path = get_path("summary_dir") / f"{trade_date}.json"
             summary_path.parent.mkdir(parents=True, exist_ok=True)
             summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
             notifier_email.send_email(summary, sorted(missing_symbols))
@@ -305,7 +304,7 @@ async def _run_async(trade_date: str) -> int:
         summary["level"] = level
 
     # ✅ 关键修复：无条件把最终 summary 写回磁盘（覆盖 report.build_summary 的初始文件）
-    summary_path = Path("stock_collector/data/summary") / f"{trade_date}.json"
+    summary_path = get_path("summary_dir") / f"{trade_date}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -408,3 +407,4 @@ def run() -> int:
     market_tz = pytz.timezone(schedule["timezone_market"])
     target_date = datetime.now(market_tz).strftime("%Y-%m-%d")
     return run_after_close(target_date)
+from stock_collector.config.settings import get_path

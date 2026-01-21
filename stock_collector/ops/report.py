@@ -1,11 +1,11 @@
 import json
 from collections import Counter
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
+from stock_collector.config.settings import get_path
 
-SUMMARY_DIR = Path("stock_collector/data/summary")
+SUMMARY_DIR = get_path("summary_dir")
 
 
 def build_summary(

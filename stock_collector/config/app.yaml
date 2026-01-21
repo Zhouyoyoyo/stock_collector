@@ -1,0 +1,10 @@
+paths:
+  data_dir: "stock_collector/data"
+  db_path: "stock_collector/data/stock_daily.db"
+  summary_dir: "stock_collector/data/summary"
+  backup_dir: "stock_collector/data/backup"
+urls:
+  sina_stock_list: "https://finance.sina.com.cn/stock/api/openapi.php/Stock_V2_getStockList?size=6000&page=1"
+  sina_quote_page: "https://finance.sina.com.cn/realstock/company/{symbol}/nc.shtml"
+  sina_kline_api: "https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketData.getKLineData"
+  sina_kline_jsonp: "https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_kline="

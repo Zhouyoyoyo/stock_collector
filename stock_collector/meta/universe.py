@@ -5,6 +5,8 @@ from urllib.request import urlopen
 
 import yaml
 
+from stock_collector.config.settings import get_url
+
 
 DEFAULT_CONFIG_PATH = "stock_collector/config/stocks.yaml"
 
@@ -40,7 +42,7 @@ def refresh_universe_cache(config_path: str = DEFAULT_CONFIG_PATH) -> list[str]:
     default_symbols = [symbol.upper() for symbol in config.get("default_symbols", [])]
     symbols: list[str] = []
 
-    url = "https://finance.sina.com.cn/stock/api/openapi.php/Stock_V2_getStockList?size=6000&page=1"
+    url = get_url("sina_stock_list")
     try:
         with urlopen(url, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
