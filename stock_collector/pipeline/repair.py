@@ -6,11 +6,6 @@ from stock_collector.storage.writer import open_db
 
 def plan_repairs_from_summary(summary: dict) -> list[str]:
     """根据 summary 状态返回待补缺的股票列表。"""
-    missing = summary.get("missing", 0)
-    failed = summary.get("failed", 0)
-    if missing <= 0 and failed <= 0:
-        return []
-
     trade_date = summary.get("date")
     if not trade_date:
         return []
