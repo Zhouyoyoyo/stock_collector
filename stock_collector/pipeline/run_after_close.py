@@ -63,6 +63,37 @@ def _runner_name() -> str:
     return "github-actions" if os.getenv("GITHUB_ACTIONS") else "local"
 
 
+def _write_skip_summary(trade_date: str, reason: str) -> None:
+    summary = report.build_summary(
+        date_value=trade_date,
+        expected=0,
+        success=0,
+        failed=0,
+        missing=0,
+        skipped=0,
+        retry_success=0,
+        duration_seconds=0.0,
+        source="sina",
+        runner=_runner_name(),
+        human_required=False,
+        level="INFO",
+        errors=[],
+    )
+    summary["success_rate"] = 0.0
+    summary["same_symbol_missing_days"] = 0
+    summary["human_required"] = False
+    summary["skip_reason"] = reason
+
+    write_summary_csv(
+        base_dir=CSV_BASE_DIR,
+        trade_date=trade_date,
+        summary_rows=summary.get("symbols", []),
+    )
+    summary_path = get_path("summary_dir") / f"{trade_date}.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _build_daily_bar(raw: dict) -> DailyBar:
     return DailyBar(
         symbol=raw["symbol"],
@@ -559,13 +590,18 @@ def run_after_close(target_date: str) -> int:
     schedule = _load_yaml(SCHEDULE_CONFIG)
     market_tz = pytz.timezone(schedule["timezone_market"])
     now_market = datetime.now(market_tz)
+    is_trading_day = is_calendar_trading_day(target_date)
 
     if not _within_window(now_market, schedule):
         log.info("[SKIP] %s outside run window", target_date)
+        if not is_trading_day and report.load_summary(target_date) is None:
+            _write_skip_summary(target_date, "non_trading_day")
         return 0
 
     if not should_collect(target_date):
         log.info("[SKIP] %s no collection needed", target_date)
+        if not is_trading_day and report.load_summary(target_date) is None:
+            _write_skip_summary(target_date, "non_trading_day")
         return 0
 
     first_code = run_collection(target_date)
