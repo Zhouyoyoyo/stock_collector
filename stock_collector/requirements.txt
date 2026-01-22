@@ -6,3 +6,4 @@ requests
 
 exchange-calendars
 pandas
+tushare
