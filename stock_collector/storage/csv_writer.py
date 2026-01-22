@@ -1,6 +1,7 @@
 from pathlib import Path
-import csv
-from typing import List, Dict
+from typing import Dict, List
+
+import pandas as pd
 
 
 CSV_COLUMNS = [
@@ -13,6 +14,12 @@ CSV_COLUMNS = [
     "volume",
     "amount",
 ]
+
+TEXT_COLUMNS = {
+    "ts_code",
+    "symbol",
+    "trade_date",
+}
 
 
 def write_symbol_csv(
@@ -31,11 +38,15 @@ def write_symbol_csv(
 
     path = day_dir / f"{symbol}.csv"
 
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        for r in rows:
-            writer.writerow({k: r.get(k) for k in CSV_COLUMNS})
+    if rows:
+        df = pd.DataFrame(rows)
+    else:
+        df = pd.DataFrame(columns=CSV_COLUMNS)
+    df = df.reindex(columns=CSV_COLUMNS)
+    for col in TEXT_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+    df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
 def write_summary_csv(
@@ -47,13 +58,11 @@ def write_summary_csv(
 
     if not summary_rows:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
+        path.write_text("", encoding="utf-8-sig")
         return
 
-    columns = list(summary_rows[0].keys())
-
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=columns)
-        writer.writeheader()
-        for r in summary_rows:
-            writer.writerow(r)
+    df = pd.DataFrame(summary_rows)
+    for col in TEXT_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+    df.to_csv(path, index=False, encoding="utf-8-sig")

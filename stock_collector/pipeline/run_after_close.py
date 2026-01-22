@@ -12,13 +12,13 @@ import pytz
 import yaml
 
 from stock_collector.config.settings import get_path
-from stock_collector.meta.universe import load_universe
 from stock_collector.ops import alerting, backup, notifier_email, report
 from stock_collector.ops.notifier_email import send_sms_via_email_once_per_day
 from stock_collector.ops.debug_bundle import DebugBundle, safe_env_snapshot, write_bundle
 from stock_collector.pipeline import validator
 from stock_collector.pipeline.validator import MissingBarError
 from stock_collector.pipeline.trading_calendar import is_calendar_trading_day
+from stock_collector.data.symbol_loader import load_tradeable_a_share_symbols
 from stock_collector.scraper.browser import create_browser
 from stock_collector.scraper.sina_api import fetch_daily_bar_from_sina_api
 from stock_collector.scraper.sina_dom import fetch_daily_bar_from_sina_dom
@@ -30,7 +30,6 @@ from stock_collector.storage.writer import open_db, write_daily_bar, write_statu
 
 SCHEDULE_CONFIG = "stock_collector/config/schedule.yaml"
 SCRAPER_CONFIG = "stock_collector/config/scraper.yaml"
-STOCKS_CONFIG = "stock_collector/config/stocks.yaml"
 API_WORKERS = 16
 DOM_WORKERS = 4
 CSV_BASE_DIR = Path("stock_collector/data/csv")
@@ -96,11 +95,10 @@ def _build_daily_bar(raw: dict) -> DailyBar:
     )
 
 
-async def _run_async(trade_date: str) -> int:
+async def _run_async(trade_date: str, symbols: list[str]) -> int:
     """收盘后主流程入口。"""
     log = logging.getLogger(__name__)
     schedule = _load_yaml(SCHEDULE_CONFIG)
-    stocks_config = _load_yaml(STOCKS_CONFIG)
     scraper_config = _load_yaml(SCRAPER_CONFIG)
 
     trade_date_str = trade_date
@@ -122,7 +120,6 @@ async def _run_async(trade_date: str) -> int:
         env=safe_env_snapshot(),
     ))
 
-    symbols = load_universe(stocks_config)
     write_bundle(DebugBundle(
         target_date=trade_date_str,
         stage="after_symbols_loaded",
@@ -321,7 +318,8 @@ async def _run_async(trade_date: str) -> int:
             ))
             if is_trading_day and success_count == 0:
                 raise RuntimeError(
-                    f"TRADING_DAY_NO_DATA: {trade_date} 是交易日，但未获取到任何行情数据"
+                    "TRADING_DAY_NO_DATA: "
+                    f"{trade_date} tradeable stocks={len(symbols)}, success=0"
                 )
             if is_trading_day:
                 if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
@@ -462,7 +460,8 @@ async def _run_async(trade_date: str) -> int:
     ))
     if is_trading_day and success_count == 0:
         raise RuntimeError(
-            f"TRADING_DAY_NO_DATA: {trade_date} 是交易日，但未获取到任何行情数据"
+            "TRADING_DAY_NO_DATA: "
+            f"{trade_date} tradeable stocks={len(symbols)}, success=0"
         )
     if is_trading_day:
         if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
@@ -571,13 +570,13 @@ def should_collect(date_value: str) -> bool:
     return False
 
 
-def run_collection(target_date: str) -> int:
+def run_collection(target_date: str, symbols: list[str]) -> int:
     # ✅ 无论如何先创建目录，保证 artifact path 一定存在
     CSV_BASE_DIR.mkdir(parents=True, exist_ok=True)
     get_path("summary_dir").mkdir(parents=True, exist_ok=True)
 
     try:
-        return asyncio.run(_run_async(target_date))
+        return asyncio.run(_run_async(target_date, symbols))
     except Exception as e:
         # ✅ 写 debug bundle，保证你能下载到崩溃证据
         write_bundle(DebugBundle(
@@ -613,7 +612,8 @@ def run_after_close(target_date: str) -> int:
         )
         return 0
 
-    return run_collection(target_date)
+    symbols = load_tradeable_a_share_symbols(target_date)
+    return run_collection(target_date, symbols)
 
 
 def run() -> int:
