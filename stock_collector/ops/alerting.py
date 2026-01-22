@@ -4,9 +4,11 @@ from typing import Any
 
 from stock_collector.config.settings import get_path
 
+# 汇总文件目录
 SUMMARY_DIR = get_path("summary_dir")
 
 
+# 计算告警等级
 def compute_level(success_rate: float, consecutive_error_days: int, thresholds: dict[str, Any]) -> str:
     if consecutive_error_days >= thresholds.get("critical_consecutive_error_days", 2):
         return "CRITICAL"
@@ -17,6 +19,7 @@ def compute_level(success_rate: float, consecutive_error_days: int, thresholds: 
     return "INFO"
 
 
+# 读取单个汇总文件的告警等级
 def _read_summary_level(path: Path) -> str:
     try:
         with path.open("r", encoding="utf-8") as file_handle:
@@ -25,6 +28,7 @@ def _read_summary_level(path: Path) -> str:
         return "INFO"
 
 
+# 计算连续错误天数
 def get_consecutive_error_days() -> int:
     if not SUMMARY_DIR.exists():
         return 0
@@ -39,6 +43,7 @@ def get_consecutive_error_days() -> int:
     return count
 
 
+# 根据规则判断是否需要人工介入
 def compute_human_required(summary: dict[str, Any], rules: dict[str, Any]) -> bool:
     failed_over = rules.get("failed_over", 0)
     missing_over = rules.get("missing_over", 0)

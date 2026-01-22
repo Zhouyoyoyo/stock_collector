@@ -6,17 +6,21 @@ import requests
 from stock_collector.config.settings import get_url
 from stock_collector.ops.debug_bundle import DEBUG_DIR
 
+# 全局 Session 缓存
 _SESSION = None
 _SESSION_LOCK = Lock()
 
 
+# 获取可复用的 Session
 def _session() -> requests.Session:
     global _SESSION
     if _SESSION is not None:
         return _SESSION
+    # 使用锁保证线程安全
     with _SESSION_LOCK:
         if _SESSION is not None:
             return _SESSION
+        # 初始化 Session 并配置连接池
         s = requests.Session()
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=50,
@@ -29,6 +33,7 @@ def _session() -> requests.Session:
         return _SESSION
 
 
+# 安全转换为 float
 def _safe_float(v) -> float:
     try:
         if v is None:
@@ -38,6 +43,7 @@ def _safe_float(v) -> float:
         return 0.0
 
 
+# 仅记录第一次原始错误响应，便于排查
 def _maybe_write_raw_first_error(
     symbol: str,
     url: str,
@@ -45,9 +51,11 @@ def _maybe_write_raw_first_error(
     response: requests.Response | None,
     exc: Exception,
 ) -> None:
+    # 若已存在错误文件则跳过
     path = DEBUG_DIR / "raw_first_error.json"
     if path.exists():
         return
+    # 确保目录存在
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "symbol": symbol,
@@ -57,19 +65,24 @@ def _maybe_write_raw_first_error(
         "response_text": response.text[:2048] if response is not None else None,
         "exception": repr(exc),
     }
+    # 写入调试信息
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# 通过新浪 API 抓取日线数据
 def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
+    # 生成请求参数
     url = get_url("sina_kline_api")
     params = {"symbol": symbol, "scale": 240, "ma": "no", "datalen": 1}
 
     s = _session()
     response = None
     try:
+        # 发起请求并校验状态码
         response = s.get(url, params=params, timeout=10)
         response.raise_for_status()
 
+        # 解析 JSON 响应
         data = response.json()
         if not data:
             raise RuntimeError("API_MISSING")
@@ -79,6 +92,7 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
         if day != trade_date:
             raise RuntimeError("API_MISSING")
 
+        # 校验关键字段
         for k in ("open", "high", "low", "close", "volume"):
             if k not in bar or bar[k] in (None, "", "--"):
                 raise RuntimeError("API_MISSING")
@@ -86,6 +100,7 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
         open_p = float(bar["open"])
         close_p = float(bar["close"])
 
+        # 返回结构化日线数据
         return {
             "symbol": symbol,
             "trade_date": day,
@@ -101,5 +116,6 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
             "source": "sina_api",
         }
     except Exception as exc:
+        # 记录首次错误响应
         _maybe_write_raw_first_error(symbol, url, params, response, exc)
         raise

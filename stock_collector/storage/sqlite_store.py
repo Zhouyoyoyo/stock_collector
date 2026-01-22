@@ -5,29 +5,39 @@ from pathlib import Path
 from stock_collector.config.settings import get_path
 from stock_collector.storage.schema import CollectStatus, DailyBar
 
+# 默认数据库路径
 DEFAULT_DB_PATH = str(get_path("db_path"))
 
 
+# 确保 daily_bar 表包含新增字段
 def _ensure_daily_bar_columns(conn: sqlite3.Connection) -> None:
+    # 读取现有字段信息
     cursor = conn.execute("PRAGMA table_info(daily_bar)")
     existing = {row[1] for row in cursor.fetchall()}
+    # 需要补充的字段定义
     additions = {
         "change": "REAL NOT NULL DEFAULT 0",
         "change_pct": "REAL NOT NULL DEFAULT 0",
         "amplitude_pct": "REAL NOT NULL DEFAULT 0",
         "turnover_pct": "REAL NOT NULL DEFAULT 0",
     }
+    # 添加缺失字段
     for column, definition in additions.items():
         if column not in existing:
             conn.execute(f"ALTER TABLE daily_bar ADD COLUMN {column} {definition}")
+    # 提交变更
     conn.commit()
 
 
+# 初始化数据库和表结构
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
+    # 解析路径并确保目录存在
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # 连接数据库并创建表结构
     with sqlite3.connect(path) as conn:
         cursor = conn.cursor()
+        # 创建日线行情表
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS daily_bar (
@@ -50,6 +60,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             )
             """
         )
+        # 创建采集状态表
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS daily_collect_status (
@@ -63,6 +74,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             )
             """
         )
+        # 创建索引以加速查询
         cursor.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_daily_bar_trade_date
@@ -75,11 +87,15 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             ON daily_collect_status (trade_date)
             """
         )
+        # 提交初始变更
         conn.commit()
+        # 确保字段齐全
         _ensure_daily_bar_columns(conn)
 
 
+# 写入或更新日线行情
 def upsert_daily_bar(conn: sqlite3.Connection, bar: DailyBar) -> None:
+    # 使用 upsert 语句保证幂等
     conn.execute(
         """
         INSERT INTO daily_bar (
@@ -122,7 +138,9 @@ def upsert_daily_bar(conn: sqlite3.Connection, bar: DailyBar) -> None:
     )
 
 
+# 写入或更新采集状态
 def upsert_collect_status(conn: sqlite3.Connection, status: CollectStatus) -> None:
+    # 使用 upsert 语句保证幂等
     conn.execute(
         """
         INSERT INTO daily_collect_status (
@@ -145,7 +163,9 @@ def upsert_collect_status(conn: sqlite3.Connection, status: CollectStatus) -> No
     )
 
 
+# 获取指定交易日的采集状态
 def fetch_statuses(conn: sqlite3.Connection, trade_date: str) -> dict[str, CollectStatus]:
+    # 查询数据库
     cursor = conn.execute(
         """
         SELECT symbol, trade_date, status, retry_count, last_error, updated_at
@@ -155,6 +175,7 @@ def fetch_statuses(conn: sqlite3.Connection, trade_date: str) -> dict[str, Colle
         (trade_date,),
     )
     rows = cursor.fetchall()
+    # 组装结果字典
     result: dict[str, CollectStatus] = {}
     for symbol, date_value, status, retry_count, last_error, updated_at in rows:
         result[symbol] = CollectStatus(
@@ -168,5 +189,6 @@ def fetch_statuses(conn: sqlite3.Connection, trade_date: str) -> dict[str, Colle
     return result
 
 
+# 获取当前 UTC 时间的 ISO 字符串
 def now_iso() -> str:
     return datetime.utcnow().isoformat()
