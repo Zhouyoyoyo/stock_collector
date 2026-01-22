@@ -582,7 +582,30 @@ def should_collect(date_value: str) -> bool:
 
 
 def run_collection(target_date: str) -> int:
-    return asyncio.run(_run_async(target_date))
+    # ✅ 无论如何先创建目录，保证 artifact path 一定存在
+    CSV_BASE_DIR.mkdir(parents=True, exist_ok=True)
+    get_path("summary_dir").mkdir(parents=True, exist_ok=True)
+
+    try:
+        return asyncio.run(_run_async(target_date))
+    except Exception as e:
+        # ✅ 写 debug bundle，保证你能下载到崩溃证据
+        write_bundle(DebugBundle(
+            target_date=target_date,
+            stage="exception",
+            is_trading_day=None,
+            total_symbols=0,
+            success_count=0,
+            missing_count=0,
+            failed_count=0,
+            first_error={"type": "exception", "exception": repr(e)},
+            note="pipeline crashed before producing summary",
+            env=safe_env_snapshot(),
+        ))
+
+        # ✅ 写一个 CRITICAL summary.json，避免“runner 成功但无数据/无 summary”
+        _write_skip_summary(target_date, reason=f"exception:{type(e).__name__}:{e}")
+        raise
 
 
 def run_after_close(target_date: str) -> int:

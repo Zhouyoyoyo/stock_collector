@@ -67,3 +67,4 @@ jobs:
             stock_collector/data/debug_bundle/**
             stock_collector/data/csv/**
             stock_collector/data/summary/*.json
+            stock_collector/data/stock_daily.db
