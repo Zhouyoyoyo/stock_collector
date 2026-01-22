@@ -11,9 +11,6 @@ _SESSION_LOCK = Lock()
 
 
 def _session() -> requests.Session:
-    """
-    带重试的 Session（最小侵入，不引入新库）
-    """
     global _SESSION
     if _SESSION is not None:
         return _SESSION
@@ -64,11 +61,6 @@ def _maybe_write_raw_first_error(
 
 
 def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
-    """
-    主路径：新浪 JSON K 线接口
-    - 若返回空/日期不匹配/字段不全：抛 RuntimeError(API_MISSING)
-    - 其他错误：原样抛出（会进入 api_failed）
-    """
     url = get_url("sina_kline_api")
     params = {"symbol": symbol, "scale": 240, "ma": "no", "datalen": 1}
 
@@ -87,7 +79,6 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
         if day != trade_date:
             raise RuntimeError("API_MISSING")
 
-        # 必需字段（OHLCV）缺失则视为 missing
         for k in ("open", "high", "low", "close", "volume"):
             if k not in bar or bar[k] in (None, "", "--"):
                 raise RuntimeError("API_MISSING")
@@ -102,7 +93,6 @@ def fetch_daily_bar_from_sina_api(symbol: str, trade_date: str) -> dict:
             "high": float(bar["high"]),
             "low": float(bar["low"]),
             "close": close_p,
-            # API volume 本身通常是股数；统一转 int
             "volume": int(float(bar["volume"])),
             "amount": _safe_float(bar.get("amount")),
             "pre_close": _safe_float(bar.get("preclose")),

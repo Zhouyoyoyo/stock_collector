@@ -1,11 +1,8 @@
-"""补缺修复模块占位实现。"""
-
 from stock_collector.storage.sqlite_store import DEFAULT_DB_PATH, fetch_statuses, init_db
 from stock_collector.storage.writer import open_db
 
 
 def plan_repairs_from_summary(summary: dict) -> list[str]:
-    """根据 summary 状态返回待补缺的股票列表。"""
     trade_date = summary.get("date")
     if not trade_date:
         return []

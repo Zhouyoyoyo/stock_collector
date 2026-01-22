@@ -17,7 +17,6 @@ def _read_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
 
 
 def load_universe(config: dict[str, Any]) -> list[str]:
-    """加载股票池，优先使用缓存文件。"""
     cache_path = Path(config["universe_cache"])
     if cache_path.exists():
         try:
@@ -35,7 +34,6 @@ def load_universe(config: dict[str, Any]) -> list[str]:
 
 
 def refresh_universe_cache(config_path: str = DEFAULT_CONFIG_PATH) -> list[str]:
-    """刷新股票池缓存，失败时回退到默认股票池。"""
     config = _read_config(config_path)
     cache_path = Path(config["universe_cache"])
     cache_path.parent.mkdir(parents=True, exist_ok=True)

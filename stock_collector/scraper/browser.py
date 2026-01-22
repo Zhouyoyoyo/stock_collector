@@ -24,7 +24,6 @@ class BrowserSession:
 
 
 async def create_browser(config_path: str = SCRAPER_CONFIG_PATH) -> BrowserSession:
-    """创建 Playwright 浏览器实例。"""
     with open(config_path, "r", encoding="utf-8") as file_handle:
         config = yaml.safe_load(file_handle)
     browser_config = config["browser"]

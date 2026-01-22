@@ -28,11 +28,6 @@ def write_symbol_csv(
     symbol: str,
     rows: List[Dict],
 ):
-    """
-    强制规则：
-    - 每个 symbol 一个 CSV
-    - 即使 rows 为空，也必须生成 CSV（只写 header）
-    """
     day_dir = base_dir / trade_date
     day_dir.mkdir(parents=True, exist_ok=True)
 

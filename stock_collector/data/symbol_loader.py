@@ -2,11 +2,6 @@ import pandas as pd
 
 
 def load_tradeable_a_share_symbols(trade_date: str) -> list[str]:
-    """
-    返回指定交易日「可交易的全量 A 股股票代码」
-    - 不包含停牌
-    - 不包含退市
-    """
     import tushare as ts
 
     pro = ts.pro_api()

@@ -7,7 +7,6 @@ class MissingBarError(RuntimeError):
 
 
 def validate_bar(bar: DailyBar) -> list[str]:
-    """校验 OHLCV 合法性。"""
     errors: list[str] = []
     if bar.open <= 0 or bar.high <= 0 or bar.low <= 0 or bar.close <= 0:
         errors.append("价格必须为正数")

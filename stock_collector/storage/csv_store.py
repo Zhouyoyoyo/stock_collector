@@ -5,7 +5,6 @@ from stock_collector.storage.schema import DailyBar
 
 
 def export_daily_bars(path: str, bars: list[DailyBar]) -> None:
-    """导出日线数据到 CSV。"""
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("w", newline="", encoding="utf-8") as file_handle:

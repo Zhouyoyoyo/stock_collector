@@ -23,7 +23,6 @@ def build_summary(
     level: str,
     errors: list[str],
 ) -> dict[str, Any]:
-    """生成 summary 并写入文件。"""
     SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
     top_errors = Counter(errors).most_common(5)
     summary = {
@@ -63,11 +62,6 @@ def build_summary(
 
 
 def load_summary(date_value: str) -> dict[str, Any] | None:
-    """
-    只允许读取该 date 的 summary
-    若不存在，返回 None
-    严禁 fallback
-    """
     summary_path = SUMMARY_DIR / f"{date_value}.json"
     if not summary_path.exists():
         return None
