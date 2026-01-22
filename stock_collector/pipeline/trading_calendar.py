@@ -20,8 +20,27 @@ def is_calendar_trading_day(date_value: str) -> bool:
     cal = _get_xshg_calendar()
     import pandas as pd
 
-    ts = pd.Timestamp(date.fromisoformat(date_value))
-    return bool(cal.is_session(ts))
+    d = date.fromisoformat(date_value)
+    ts = pd.Timestamp(d)
+
+    # 交易所日历边界
+    first = cal.sessions[0].date()
+    last = cal.sessions[-1].date()
+
+    # 早于最早日历：肯定是调用方 bug
+    if d < first:
+        raise RuntimeError(f"DATE_TOO_EARLY: {d} < {first}")
+
+    try:
+        return bool(cal.is_session(ts))
+    except Exception as e:
+        # exchange_calendars 会抛 DateOutOfBounds，但我们不依赖具体类型（避免版本差异）
+        msg = str(e)
+        if "DateOutOfBounds" in msg or "out of bounds" in msg or d > last:
+            # 日历不覆盖到今天/未来：不允许在这里把 pipeline 直接打死
+            # 继续跑采集，用采集结果证明“是否真的缺失”
+            return True
+        raise
 
 
 def is_trading_day(d: date | datetime) -> bool:
