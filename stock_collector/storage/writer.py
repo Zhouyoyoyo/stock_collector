@@ -8,7 +8,6 @@ from stock_collector.storage.sqlite_store import DEFAULT_DB_PATH, init_db, upser
 
 @contextmanager
 def open_db(db_path: str = DEFAULT_DB_PATH):
-    """打开数据库连接。"""
     init_db(db_path)
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)

@@ -25,7 +25,6 @@ def send_email(
     body: str | None = None,
     to_addr: str | None = None,
 ) -> bool:
-    """发送邮件通知。"""
     config = _load_config()["email"]
     if not config.get("enabled", True):
         print("[notify] 邮件通知已禁用")
@@ -41,15 +40,11 @@ def send_email(
     mail_to = config.get("to")
     mail_from = config.get("from")
 
-    # ✅ 修复：允许无认证 SMTP（本地 relay / IP 白名单），只在同时具备 user+pass 时才 login
     if (smtp_user and not smtp_pass) or (smtp_pass and not smtp_user):
-        # 配置不一致：只给出警告，但仍尝试“无认证发送”
         print("[notify] SMTP 凭据不完整，将尝试无认证发送（跳过 login）")
     elif not smtp_user and not smtp_pass:
-        # 完全未配置凭据：允许无认证发送
         print("[notify] 未配置 SMTP 凭据，将尝试无认证发送（跳过 login）")
 
-    # ✅ 强制：邮箱配置不完整时必须降级，不允许中断主流程
     required_fields = {
         "smtp_host": smtp_host,
         "smtp_port": smtp_port,
@@ -116,7 +111,6 @@ def send_email(
         with server:
             server.ehlo()
 
-            # 严格要求：SMTP_USER / SMTP_PASS 必须同时存在
             if not smtp_user or not smtp_pass:
                 print(
                     "[notify][WARN] SMTP_USER / SMTP_PASS 缺失，"
@@ -131,26 +125,14 @@ def send_email(
         return True
 
     except Exception as e:
-        # ⚠️ 通知失败不允许影响主流程
         print(f"[notify][ERROR] 邮件发送失败（已吞异常，不影响主流程）: {e}")
         return False
 
 
-# =========================
-# SMS via Email (China Telecom 189)
-# =========================
-
-_SMS_SENT_FLAG = None  # 仅用于进程内防重复
+_SMS_SENT_FLAG = None
 
 
 def send_sms_via_email_once_per_day(message: str):
-    """
-    通过中国电信 Email-to-SMS 网关发送短信（189.com）。
-    规则：
-    - 仅 CRITICAL 调用
-    - 同一自然日最多发送一次（进程级防抖）
-    - 失败静默，不允许抛异常
-    """
     global _SMS_SENT_FLAG
 
     today = date.today().isoformat()
@@ -167,7 +149,7 @@ def send_sms_via_email_once_per_day(message: str):
 
     try:
         subject = "系统告警"
-        body = message[:120]  # 防止内容过长被运营商丢弃
+        body = message[:120]
 
         sent = send_email(
             to_addr=sms_addr,
@@ -181,5 +163,4 @@ def send_sms_via_email_once_per_day(message: str):
         print(f"[notify] SMS via email sent to {sms_addr}")
 
     except Exception as e:
-        # ❗短信失败不能影响主流程
         print(f"[notify] SMS via email failed (ignored): {e}")

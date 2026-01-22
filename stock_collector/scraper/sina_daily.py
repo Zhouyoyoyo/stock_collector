@@ -55,7 +55,6 @@ def _to_int(value: Any) -> int:
 
 
 def fetch_daily_bar(page: Page, symbol: str, trade_date: str) -> DailyBar:
-    """抓取新浪单日行情。"""
     symbol_lower = symbol.lower()
     source = "sina"
     url = get_url("sina_quote_page").format(symbol=symbol_lower)

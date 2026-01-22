@@ -4,8 +4,6 @@ from datetime import datetime
 
 @dataclass
 class DailyBar:
-    """日线数据结构。"""
-
     symbol: str
     trade_date: str
     open: float
@@ -25,8 +23,6 @@ class DailyBar:
 
 @dataclass
 class CollectStatus:
-    """采集状态结构。"""
-
     trade_date: str
     symbol: str
     status: str

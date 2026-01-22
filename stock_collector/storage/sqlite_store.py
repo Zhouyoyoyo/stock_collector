@@ -24,7 +24,6 @@ def _ensure_daily_bar_columns(conn: sqlite3.Connection) -> None:
 
 
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
-    """初始化数据库表结构。"""
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
@@ -81,7 +80,6 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
 
 
 def upsert_daily_bar(conn: sqlite3.Connection, bar: DailyBar) -> None:
-    """幂等写入日线数据。"""
     conn.execute(
         """
         INSERT INTO daily_bar (
@@ -125,7 +123,6 @@ def upsert_daily_bar(conn: sqlite3.Connection, bar: DailyBar) -> None:
 
 
 def upsert_collect_status(conn: sqlite3.Connection, status: CollectStatus) -> None:
-    """幂等写入采集状态。"""
     conn.execute(
         """
         INSERT INTO daily_collect_status (
@@ -149,7 +146,6 @@ def upsert_collect_status(conn: sqlite3.Connection, status: CollectStatus) -> No
 
 
 def fetch_statuses(conn: sqlite3.Connection, trade_date: str) -> dict[str, CollectStatus]:
-    """读取指定日期的状态。"""
     cursor = conn.execute(
         """
         SELECT symbol, trade_date, status, retry_count, last_error, updated_at

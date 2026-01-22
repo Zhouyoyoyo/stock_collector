@@ -96,7 +96,6 @@ def _build_daily_bar(raw: dict) -> DailyBar:
 
 
 async def _run_async(trade_date: str, symbols: list[str]) -> int:
-    """收盘后主流程入口。"""
     log = logging.getLogger(__name__)
     schedule = _load_yaml(SCHEDULE_CONFIG)
     scraper_config = _load_yaml(SCRAPER_CONFIG)
@@ -106,7 +105,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
     success_count = 0
     missing_count = 0
     failed_count = 0
-    first_error = None  # dict or None
+    first_error = None
     write_bundle(DebugBundle(
         target_date=trade_date_str,
         stage="start",
@@ -518,11 +517,9 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
         if initial_level in {"ERROR", "CRITICAL"}:
             level = "CRITICAL"
 
-    # level 如有变化则更新
     if level != initial_level:
         summary["level"] = level
 
-    # ✅ 关键修复：无条件把最终 summary 写回磁盘（覆盖 report.build_summary 的初始文件）
     summary_path = get_path("summary_dir") / f"{trade_date}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -571,14 +568,12 @@ def should_collect(date_value: str) -> bool:
 
 
 def run_collection(target_date: str, symbols: list[str]) -> int:
-    # ✅ 无论如何先创建目录，保证 artifact path 一定存在
     CSV_BASE_DIR.mkdir(parents=True, exist_ok=True)
     get_path("summary_dir").mkdir(parents=True, exist_ok=True)
 
     try:
         return asyncio.run(_run_async(target_date, symbols))
     except Exception as e:
-        # ✅ 写 debug bundle，保证你能下载到崩溃证据
         write_bundle(DebugBundle(
             target_date=target_date,
             stage="exception",
@@ -592,19 +587,11 @@ def run_collection(target_date: str, symbols: list[str]) -> int:
             env=safe_env_snapshot(),
         ))
 
-        # ✅ 写一个 CRITICAL summary.json，避免“runner 成功但无数据/无 summary”
         _write_skip_summary(target_date, reason=f"exception:{type(e).__name__}:{e}")
         raise
 
 
 def run_after_close(target_date: str) -> int:
-    """
-    规则（不可变）：
-    - 非交易日：允许 skip
-    - 交易日：必须采集
-      - 拿到数据：success
-      - 拿不到数据：fail
-    """
     if not is_calendar_trading_day(target_date):
         _write_skip_summary(
             target_date,

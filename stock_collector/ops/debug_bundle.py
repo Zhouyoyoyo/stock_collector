@@ -14,7 +14,7 @@ DEBUG_DIR = Path("stock_collector/data/debug_bundle")
 @dataclass
 class DebugBundle:
     target_date: str
-    stage: str                # e.g. "start", "after_symbols_loaded", "after_fetch", "fatal"
+    stage: str
     is_trading_day: Optional[bool]
     total_symbols: int
     success_count: int
@@ -26,7 +26,6 @@ class DebugBundle:
 
 
 def safe_env_snapshot() -> Dict[str, Any]:
-    # 只取必要信息，避免泄露 secrets
     keys = [
         "GITHUB_ACTIONS", "GITHUB_RUN_ID", "GITHUB_REF", "GITHUB_SHA",
         "PYTHON_VERSION",
