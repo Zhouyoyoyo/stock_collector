@@ -41,24 +41,6 @@ def _load_yaml(path: str) -> dict:
         return yaml.safe_load(file_handle)
 
 
-def _within_window(now_market: datetime, schedule: dict) -> bool:
-    start_hm = schedule["run_not_before_hm"]
-    end_hm = schedule["run_not_after_hm"]
-    start = now_market.replace(
-        hour=int(start_hm.split(":")[0]),
-        minute=int(start_hm.split(":")[1]),
-        second=0,
-        microsecond=0,
-    )
-    end = now_market.replace(
-        hour=int(end_hm.split(":")[0]),
-        minute=int(end_hm.split(":")[1]),
-        second=0,
-        microsecond=0,
-    )
-    return start <= now_market <= end
-
-
 def _runner_name() -> str:
     return "github-actions" if os.getenv("GITHUB_ACTIONS") else "local"
 
@@ -337,6 +319,10 @@ async def _run_async(trade_date: str) -> int:
                 note="fetch finished",
                 env=safe_env_snapshot(),
             ))
+            if is_trading_day and success_count == 0:
+                raise RuntimeError(
+                    f"TRADING_DAY_NO_DATA: {trade_date} 是交易日，但未获取到任何行情数据"
+                )
             if is_trading_day:
                 if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
                     write_bundle(DebugBundle(
@@ -474,6 +460,10 @@ async def _run_async(trade_date: str) -> int:
         note="fetch finished",
         env=safe_env_snapshot(),
     ))
+    if is_trading_day and success_count == 0:
+        raise RuntimeError(
+            f"TRADING_DAY_NO_DATA: {trade_date} 是交易日，但未获取到任何行情数据"
+        )
     if is_trading_day:
         if success_count != len(symbols) or missing_count != 0 or failed_count != 0:
             write_bundle(DebugBundle(
@@ -609,83 +599,21 @@ def run_collection(target_date: str) -> int:
 
 
 def run_after_close(target_date: str) -> int:
-    log = logging.getLogger(__name__)
-    schedule = _load_yaml(SCHEDULE_CONFIG)
-    market_tz = pytz.timezone(schedule["timezone_market"])
-    now_market = datetime.now(market_tz)
-    is_trading_day = is_calendar_trading_day(target_date)
-    summary_exists = report.load_summary(target_date) is not None
-
-    if not _within_window(now_market, schedule):
-        log.info("[SKIP] %s outside run window", target_date)
-        write_bundle(DebugBundle(
-            target_date=target_date,
-            stage="skip_outside_window",
-            is_trading_day=is_trading_day,
-            total_symbols=0,
-            success_count=0,
-            missing_count=0,
-            failed_count=0,
-            first_error=None,
-            note="skip: outside run window",
-            env=safe_env_snapshot(),
-        ))
-        if not summary_exists:
-            _write_skip_summary(
-                target_date,
-                "non_trading_day" if not is_trading_day else "outside_window",
-            )
-        return 0
-
-    if not should_collect(target_date):
-        log.info("[SKIP] %s no collection needed", target_date)
-        write_bundle(DebugBundle(
-            target_date=target_date,
-            stage="skip_no_collection",
-            is_trading_day=is_trading_day,
-            total_symbols=0,
-            success_count=0,
-            missing_count=0,
-            failed_count=0,
-            first_error=None,
-            note="skip: no collection needed",
-            env=safe_env_snapshot(),
-        ))
-        if not summary_exists and not is_trading_day:
-            _write_skip_summary(target_date, "non_trading_day")
-        return 0
-
-    first_code = run_collection(target_date)
-    summary = report.load_summary(target_date)
-    if summary is None:
-        log.warning("summary missing after first run: %s", target_date)
-        return 2
-
-    log.info(
-        "first run summary for %s: success=%s failed=%s missing=%s",
-        target_date,
-        summary.get("success", 0),
-        summary.get("failed", 0),
-        summary.get("missing", 0),
-    )
-
-    if summary.get("missing", 0) > 0 or summary.get("failed", 0) > 0:
-        log.info("triggering second run for %s to repair missing/failed", target_date)
-        second_code = run_collection(target_date)
-        second_summary = report.load_summary(target_date)
-        if second_summary is None:
-            log.warning("summary missing after second run: %s", target_date)
-            return 2
-        log.info(
-            "second run summary for %s: success=%s failed=%s missing=%s",
+    """
+    规则（不可变）：
+    - 非交易日：允许 skip
+    - 交易日：必须采集
+      - 拿到数据：success
+      - 拿不到数据：fail
+    """
+    if not is_calendar_trading_day(target_date):
+        _write_skip_summary(
             target_date,
-            second_summary.get("success", 0),
-            second_summary.get("failed", 0),
-            second_summary.get("missing", 0),
+            reason="non_trading_day",
         )
-        return second_code
+        return 0
 
-    return first_code
+    return run_collection(target_date)
 
 
 def run() -> int:
