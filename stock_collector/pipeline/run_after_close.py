@@ -28,6 +28,7 @@ from stock_collector.storage.sqlite_store import DEFAULT_DB_PATH, fetch_statuses
 from stock_collector.storage.writer import open_db, write_daily_bar, write_status
 
 
+# 配置与运行参数
 SCHEDULE_CONFIG = "stock_collector/config/schedule.yaml"
 SCRAPER_CONFIG = "stock_collector/config/scraper.yaml"
 API_WORKERS = 16
@@ -35,16 +36,20 @@ DOM_WORKERS = 4
 CSV_BASE_DIR = Path("stock_collector/data/csv")
 
 
+# 加载 YAML 文件
 def _load_yaml(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as file_handle:
         return yaml.safe_load(file_handle)
 
 
+# 获取运行环境名称
 def _runner_name() -> str:
     return "github-actions" if os.getenv("GITHUB_ACTIONS") else "local"
 
 
+# 写入跳过采集的汇总文件
 def _write_skip_summary(trade_date: str, reason: str) -> None:
+    # 构建汇总结构
     summary = report.build_summary(
         date_value=trade_date,
         expected=0,
@@ -65,16 +70,19 @@ def _write_skip_summary(trade_date: str, reason: str) -> None:
     summary["human_required"] = False
     summary["skip_reason"] = reason
 
+    # 写入 CSV 汇总
     write_summary_csv(
         base_dir=CSV_BASE_DIR,
         trade_date=trade_date,
         summary_rows=summary.get("symbols", []),
     )
+    # 写入 JSON 汇总
     summary_path = get_path("summary_dir") / f"{trade_date}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# 将原始数据转换为 DailyBar 对象
 def _build_daily_bar(raw: dict) -> DailyBar:
     return DailyBar(
         symbol=raw["symbol"],
@@ -95,17 +103,21 @@ def _build_daily_bar(raw: dict) -> DailyBar:
     )
 
 
+# 异步执行采集流程
 async def _run_async(trade_date: str, symbols: list[str]) -> int:
+    # 初始化日志与配置
     log = logging.getLogger(__name__)
     schedule = _load_yaml(SCHEDULE_CONFIG)
     scraper_config = _load_yaml(SCRAPER_CONFIG)
 
+    # 初始化状态变量
     trade_date_str = trade_date
     is_trading_day = is_calendar_trading_day(trade_date)
     success_count = 0
     missing_count = 0
     failed_count = 0
     first_error = None
+    # 写入启动调试包
     write_bundle(DebugBundle(
         target_date=trade_date_str,
         stage="start",
@@ -119,6 +131,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
         env=safe_env_snapshot(),
     ))
 
+    # 写入加载股票池后的调试包
     write_bundle(DebugBundle(
         target_date=trade_date_str,
         stage="after_symbols_loaded",
@@ -131,6 +144,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
         note="symbols loaded",
         env=safe_env_snapshot(),
     ))
+    # 写入交易日判断后的调试包
     write_bundle(DebugBundle(
         target_date=trade_date_str,
         stage="trading_day_checked",
@@ -143,8 +157,10 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
         note="trading day decided",
         env=safe_env_snapshot(),
     ))
+    # 初始化数据库
     init_db(DEFAULT_DB_PATH)
 
+    # 初始化统计容器
     start_time = time.time()
     errors: list[str] = []
     success_symbols: set[str] = set()
@@ -155,11 +171,14 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
     api_failed_symbols: list[str] = []
     retry_success = 0
 
+    # 读取限速配置
     rate_limit = scraper_config.get("rate_limit", {})
     delay_ms = rate_limit.get("per_symbol_delay_ms", 200)
     jitter_ms = rate_limit.get("random_jitter_ms", 120)
 
+    # 打开数据库连接
     with open_db(DEFAULT_DB_PATH) as conn:
+        # 记录采集状态
         def record_status(symbol: str, status: str, retry_count: int, last_error: str = "") -> None:
             status_obj = CollectStatus(
                 trade_date=trade_date,
@@ -171,6 +190,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
             )
             write_status(conn, status_obj)
 
+        # 记录成功状态
         def record_success(symbol: str, retry_count: int = 0, source: str = "api") -> None:
             nonlocal success_count
             if symbol not in success_symbols:
@@ -178,6 +198,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
             success_symbols.add(symbol)
             record_status(symbol, "success", retry_count, "")
 
+        # 记录跳过状态
         def record_skipped(symbol: str, reason: str, retry_count: int = 0) -> None:
             skipped_symbols.add(symbol)
             record_status(symbol, "skipped", retry_count, reason)
@@ -188,6 +209,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 rows=[],
             )
 
+        # 记录 API 失败状态
         def record_api_failure(symbol: str, error: str) -> None:
             nonlocal failed_count, first_error
             record_status(symbol, "api_failed", 0, error)
@@ -208,6 +230,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 rows=[],
             )
 
+        # 记录通用失败状态
         def record_failure(symbol: str, error: str) -> None:
             nonlocal failed_count, first_error
             if symbol not in failed_event_symbols:
@@ -229,6 +252,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 rows=[],
             )
 
+        # 记录缺失状态
         def record_missing(symbol: str, reason: str) -> None:
             nonlocal missing_count, first_error
             if symbol not in missing_symbols:
@@ -248,6 +272,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 rows=[],
             )
 
+        # 判断是否已采集
         def already_collected(symbol: str, date_value: str) -> bool:
             if symbol in success_symbols:
                 return True
@@ -257,6 +282,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
             )
             return cursor.fetchone() is not None
 
+        # 校验日线数据
         def validate_bar(bar: DailyBar) -> None:
             if bar.trade_date != trade_date:
                 raise MissingBarError(bar.symbol, trade_date, f"日期不匹配: {bar.trade_date}")
@@ -264,6 +290,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
             if validate_errors:
                 raise RuntimeError(";".join(validate_errors))
 
+        # 保存日线数据并写出 CSV
         def store_bar(bar: DailyBar) -> None:
             if already_collected(bar.symbol, bar.trade_date):
                 return
@@ -286,6 +313,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 ],
             )
 
+        # 读取已有状态并构建待采集列表
         current_status = fetch_statuses(conn, trade_date)
         todo_symbols: list[str] = []
         for symbol in symbols:
@@ -300,8 +328,10 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 continue
             todo_symbols.append(symbol)
 
+        # 输出待采集数量
         log.info("todo_symbols=%s for %s", len(todo_symbols), trade_date)
 
+        # 若无待采集则直接收尾
         if not todo_symbols:
             write_bundle(DebugBundle(
                 target_date=trade_date,
@@ -315,6 +345,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 note="fetch finished",
                 env=safe_env_snapshot(),
             ))
+            # 交易日但无数据时抛错
             if is_trading_day and success_count == 0:
                 raise RuntimeError(
                     "TRADING_DAY_NO_DATA: "
@@ -340,6 +371,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                         f" missing={missing_count} failed={failed_count}"
                         f" first_error={first_error}"
                     )
+            # 生成汇总信息
             duration_seconds = time.time() - start_time
             expected = len(symbols)
             summary = report.build_summary(
@@ -360,6 +392,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
             summary["success_rate"] = 1.0 if expected else 0.0
             summary["same_symbol_missing_days"] = 0
             summary["human_required"] = False
+            # 写入汇总 CSV 与 JSON
             write_summary_csv(
                 base_dir=CSV_BASE_DIR,
                 trade_date=trade_date,
@@ -373,11 +406,14 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
             backup.cleanup_backups()
             return 0
 
+        # 记录 API 缺失的股票
         api_missing_symbols: list[str] = []
 
+        # 线程池任务函数
         def _api_task(sym: str):
             return sym, fetch_daily_bar_from_sina_api(sym, trade_date)
 
+        # 使用线程池并发抓取 API 数据
         with ThreadPoolExecutor(max_workers=API_WORKERS) as ex:
             future_to_symbol: dict = {}
             for symbol in todo_symbols:
@@ -403,6 +439,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                     record_api_failure(symbol, str(exc))
                     api_failed_symbols.append(symbol)
 
+        # 对 API 失败的股票使用 DOM 方式补抓
         if api_failed_symbols:
             browser = await create_browser()
             try:
@@ -431,13 +468,16 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                             record_failure(symbol, str(exc))
                     except Exception as exc:
                         record_failure(symbol, str(exc))
+                    # 限速等待
                     await asyncio.sleep((delay_ms + random.randint(0, jitter_ms)) / 1000)
             finally:
+                # 释放页面与浏览器资源
                 if "pages" in locals():
                     for p in pages:
                         await p.close()
                 await browser.close()
 
+    # 汇总统计结果
     duration_seconds = time.time() - start_time
     expected = len(symbols)
     success = len(success_symbols)
@@ -445,6 +485,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
     missing = len(missing_symbols)
     success_rate = success / expected if expected else 0.0
 
+    # 写入采集完成的调试包
     write_bundle(DebugBundle(
         target_date=trade_date_str,
         stage="after_fetch",
@@ -457,6 +498,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
         note="fetch finished",
         env=safe_env_snapshot(),
     ))
+    # 交易日业务约束校验
     if is_trading_day and success_count == 0:
         raise RuntimeError(
             "TRADING_DAY_NO_DATA: "
@@ -483,6 +525,7 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
                 f" first_error={first_error}"
             )
 
+    # 构建汇总并计算告警等级
     initial_level = alerting.compute_level(success_rate, 0, schedule["thresholds"])
     summary = report.build_summary(
         date_value=trade_date,
@@ -502,14 +545,17 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
     summary["success_rate"] = success_rate
     summary["same_symbol_missing_days"] = 0
 
+    # 判断是否需要人工处理
     human_required = alerting.compute_human_required(summary, schedule["human_required"])
     summary["human_required"] = human_required
+    # 写入汇总 CSV
     write_summary_csv(
         base_dir=CSV_BASE_DIR,
         trade_date=trade_date,
         summary_rows=summary.get("symbols", []),
     )
 
+    # 根据连续错误天数调整告警等级
     consecutive_error_days = alerting.get_consecutive_error_days()
     thresholds = schedule["thresholds"]
     level = initial_level
@@ -517,13 +563,16 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
         if initial_level in {"ERROR", "CRITICAL"}:
             level = "CRITICAL"
 
+    # 更新汇总中的告警等级
     if level != initial_level:
         summary["level"] = level
 
+    # 写入汇总 JSON
     summary_path = get_path("summary_dir") / f"{trade_date}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 发送通知与备份
     notifier_email.send_email(summary, sorted(missing_symbols))
     if summary.get("level") == "CRITICAL":
         sms_text = (
@@ -536,44 +585,55 @@ async def _run_async(trade_date: str, symbols: list[str]) -> int:
     backup.create_backup_bundle(trade_date)
     backup.cleanup_backups()
 
+    # 根据告警等级返回状态码
     if level in {"ERROR", "CRITICAL"}:
         return 2
     return 0
 
 
+# 判断指定日期是否需要再次采集
 def should_collect(date_value: str) -> bool:
+    # 非交易日直接跳过
     if not is_calendar_trading_day(date_value):
         return False
 
+    # 读取历史汇总
     summary = report.load_summary(date_value)
     if summary is None:
         return True
 
+    # 空汇总需要重试
     if summary.get("expected") == 0 and summary.get("success") == 0 and summary.get("failed") == 0 and summary.get("missing") == 0:
         return True
 
+    # CRITICAL 需要重试
     if summary.get("level") == "CRITICAL":
         return True
 
+    # 失败或缺失需要重试
     if summary.get("failed", 0) > 0:
         return True
 
     if summary.get("missing", 0) > 0:
         return True
 
+    # 成功不足也需要重试
     if summary.get("success", 0) < summary.get("expected", 0):
         return True
 
     return False
 
 
+# 运行采集流程并处理异常
 def run_collection(target_date: str, symbols: list[str]) -> int:
+    # 确保输出目录存在
     CSV_BASE_DIR.mkdir(parents=True, exist_ok=True)
     get_path("summary_dir").mkdir(parents=True, exist_ok=True)
 
     try:
         return asyncio.run(_run_async(target_date, symbols))
     except Exception as e:
+        # 写入异常调试包
         write_bundle(DebugBundle(
             target_date=target_date,
             stage="exception",
@@ -587,11 +647,14 @@ def run_collection(target_date: str, symbols: list[str]) -> int:
             env=safe_env_snapshot(),
         ))
 
+        # 写入跳过汇总并抛出异常
         _write_skip_summary(target_date, reason=f"exception:{type(e).__name__}:{e}")
         raise
 
 
+# 收盘后执行采集
 def run_after_close(target_date: str) -> int:
+    # 非交易日直接写入跳过汇总
     if not is_calendar_trading_day(target_date):
         _write_skip_summary(
             target_date,
@@ -599,11 +662,14 @@ def run_after_close(target_date: str) -> int:
         )
         return 0
 
+    # 加载股票池并执行采集
     symbols = load_tradeable_a_share_symbols(target_date)
     return run_collection(target_date, symbols)
 
 
+# 自动根据市场时区执行采集
 def run() -> int:
+    # 读取调度配置
     schedule = _load_yaml(SCHEDULE_CONFIG)
     market_tz = pytz.timezone(schedule["timezone_market"])
     target_date = datetime.now(market_tz).strftime("%Y-%m-%d")
