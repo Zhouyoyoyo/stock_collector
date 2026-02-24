@@ -75,14 +75,13 @@ jobs:
             const repo = context.repo.repo;
             core.warning(`delete_all_artifacts=true，开始删除 ${owner}/${repo} 的全部 artifacts。`);
             let total = 0;
-            let page = 1;
             const per_page = 100;
 
             while (true) {
               const { data } = await github.rest.actions.listArtifactsForRepo({
                 owner,
                 repo,
-                page,
+                page: 1,
                 per_page,
               });
 
@@ -100,7 +99,6 @@ jobs:
                 core.info(`已删除 artifact: ${artifact.name} (#${artifact.id})`);
               }
 
-              page += 1;
             }
 
             core.notice(`Artifacts 删除完成，共删除 ${total} 个。`);
