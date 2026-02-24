@@ -25,6 +25,45 @@ jobs:
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
       PHONE_NUM: ${{ secrets.PHONE_NUM }}
     steps:
+      - name: Delete all workflow artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.delete_all_artifacts == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            core.warning(`delete_all_artifacts=true，开始删除 ${owner}/${repo} 的全部 artifacts。`);
+            let total = 0;
+            let page = 1;
+            const per_page = 100;
+
+            while (true) {
+              const { data } = await github.rest.actions.listArtifactsForRepo({
+                owner,
+                repo,
+                page,
+                per_page,
+              });
+
+              if (!data.artifacts.length) {
+                break;
+              }
+
+              for (const artifact of data.artifacts) {
+                await github.rest.actions.deleteArtifact({
+                  owner,
+                  repo,
+                  artifact_id: artifact.id,
+                });
+                total += 1;
+                core.info(`已删除 artifact: ${artifact.name} (#${artifact.id})`);
+              }
+
+              page += 1;
+            }
+
+            core.notice(`Artifacts 删除完成，共删除 ${total} 个。`);
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -65,45 +104,6 @@ jobs:
 
       - name: Run collector
         run: python stock_collector/main.py --run
-
-      - name: Delete all workflow artifacts
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.delete_all_artifacts == 'true' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            core.warning(`delete_all_artifacts=true，开始删除 ${owner}/${repo} 的全部 artifacts。`);
-            let total = 0;
-            let page = 1;
-            const per_page = 100;
-
-            while (true) {
-              const { data } = await github.rest.actions.listArtifactsForRepo({
-                owner,
-                repo,
-                page,
-                per_page,
-              });
-
-              if (!data.artifacts.length) {
-                break;
-              }
-
-              for (const artifact of data.artifacts) {
-                await github.rest.actions.deleteArtifact({
-                  owner,
-                  repo,
-                  artifact_id: artifact.id,
-                });
-                total += 1;
-                core.info(`已删除 artifact: ${artifact.name} (#${artifact.id})`);
-              }
-
-              page += 1;
-            }
-
-            core.notice(`Artifacts 删除完成，共删除 ${total} 个。`);
 
   runner-check:
     name: collect-runner-2
