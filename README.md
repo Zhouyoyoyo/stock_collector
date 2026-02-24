@@ -22,7 +22,7 @@
 - 告警与通知：
   - Email（SMTP）
   - CRITICAL 时可选 “短信转邮件”（电信 189 网关：`${PHONE_NUM}@189.com`）
-- GitHub Actions 定时运行 + artifacts 上传 + DB cache 恢复
+- GitHub Actions 手动触发运行 + DB cache 恢复（不上传 artifacts）
 
 ---
 

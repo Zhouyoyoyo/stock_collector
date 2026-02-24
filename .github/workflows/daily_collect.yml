@@ -1,12 +1,11 @@
 name: daily-collect
 
 on:
-  schedule:
-    - cron: "10 7 * * 1-5"
   workflow_dispatch:
 
 jobs:
   collect:
+    name: collect-runner-1
     runs-on: ubuntu-latest
     env:
       SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -58,13 +57,9 @@ jobs:
       - name: Run collector
         run: python stock_collector/main.py --run
 
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stock-collector-artifacts
-          path: |
-            stock_collector/data/debug_bundle/**
-            stock_collector/data/csv/**
-            stock_collector/data/summary/*.json
-            stock_collector/data/stock_daily.db
+  runner-check:
+    name: collect-runner-2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Runner ready
+        run: echo "Runner-2 is ready for manual dispatch workflows."
