@@ -16,6 +16,9 @@ jobs:
   collect:
     name: collect-runner-1
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
     env:
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_PASS: ${{ secrets.SMTP_PASSWORD }}
@@ -50,13 +53,21 @@ jobs:
               }
 
               for (const artifact of data.artifacts) {
-                await github.rest.actions.deleteArtifact({
-                  owner,
-                  repo,
-                  artifact_id: artifact.id,
-                });
-                total += 1;
-                core.info(`已删除 artifact: ${artifact.name} (#${artifact.id})`);
+                try {
+                  await github.rest.actions.deleteArtifact({
+                    owner,
+                    repo,
+                    artifact_id: artifact.id,
+                  });
+                  total += 1;
+                  core.info(`已删除 artifact: ${artifact.name} (#${artifact.id})`);
+                } catch (error) {
+                  if (error.status === 403) {
+                    core.warning(`跳过无权限删除的 artifact: ${artifact.name} (#${artifact.id})`);
+                    continue;
+                  }
+                  throw error;
+                }
               }
 
               page += 1;
